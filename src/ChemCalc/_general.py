@@ -13,7 +13,7 @@ class Compound:
                 - "g" : gas
                 - "l" : liquid
                 - "aq" : aqueous 
-            - temperature: the temperature of compound in that phase
+            - temperature(int or float): the temperature of compound in that phase
         mp(int or float): melting point
         bp(int or float): boiling point
         To determine the phase phase_point_list will have priority over mp and bp
@@ -115,19 +115,48 @@ class Compound:
         else:
             return False
 class Reaction:
-    def __init__(self):
-        pass
+    def __init__(self, reactants , products , K=1, kf=1, kb=1 , T=298):
+        '''
+        creates a reaction object.
+
+        Args:
+            reactants(list of dict): a list of reactants. Each dictionary should have:
+                - stoichiometric_coefficient(int or float > 0) : the stoichiometric coefficient of the reactant
+                - compoud(Compound object)d : A Compund object of the reactant
+                - rate_dependency(int or float) : order of the reaction with respect to the reactant
+            products(list of dict): a list of products. Each dictionary should have:
+                - stoichiometric_coefficient(int or float > 0) : the stoichiometric coefficient of the product
+                - compoud(Compound object)d : A Compund object of the product
+                - rate_dependency(int or float) : order of the reaction with respect to the product
+        '''
+        self.K = K
+        self.kf = kf
+        self.kb = kb
+        self.reactants = reactants
+        self.products = products
+        self.T = T
+        self.compounds = []
+        for compound in self.reactants :
+            reactant = compound.copy()
+            reactant.update({"type" : "reactant"})
+            self.compounds.append(reactant)
+        for compound in self.products :
+            product = compound.copy()
+            product.update({"type" : "product"})
+            self.compounds.append(product)
     @classmethod
-    def from_complex_syntax(self, reaction, K=1, kf=1, kb=1):
+    def from_string_complex_syntax(cls, reaction, K=1, kf=1, kb=1 , T = 298):
         '''
         Creates reaction object from an string with any of the following formats:
-        A & 2B & ... > 3C & 2D-1 & ... \n
+        A & 2_B & ... > 3_C & 2_D_-1 & ... \n
         The prefix number represents the stoichiometric_coefficient and the default value is 1 \n
-        The suffix number represents rate_dependency and the default vaule is 1 \n
+        The suffix number represents rate_dependency or order of the reaction with respect to the reactant or product and the default vaule is 1 \n
         example: Fe(CN)6-3 & Ce+2 > Fe(CN)6-4 & Ce+3
+        Split the stoichiometric_coefficient and rate_dependency from the name of the compound with "_"
+        Unlike from_string_simple_syntax here your compound name could include numbers and + , -
 
         To specify the phase use the following syntax:
-        A.g & 2B.s & ... > 3c.aq & 2D-1.g & ...
+        A.g & 2B.s & ... > 3c.aq & 2D.g-1 & ...
         Args:
             reaction(string): The equation formula with the mentioned structure.
 
@@ -138,124 +167,223 @@ class Reaction:
             kb(int or float): The backward reaction rate constant
 
         '''
-        self.K = K
-        self.kf = kf
-        self.kb = kb
+
         reformed_reaction = reaction.replace(" ","").split(">")
         splited_to_component_reaction = [component.split("&") for component in reformed_reaction] 
         component_counter = 0
-        self.equation = reaction
-        self.reactants = []
-        self.products = []
+        inputed_reactants = []
+        inputed_products = []
         for component in splited_to_component_reaction:
             counter = 0
+            acceptable_pattern_for_section = re.compile(
+                r'^(\d+(?:\.\d+)?_[A-Za-z0-9+.\-()]+_-?\d+(?:\.\d+)?|' 
+                r'\d+(?:\.\d+)?_[A-Za-z0-9+.\-()]+|' 
+                r'[A-Za-z0-9+.\-()]+_-?\d+(?:\.\d+)?|' 
+                r'[A-Za-z0-9+.\-()]+)(\.s|\.g|\.l)?$'
+            )
             for section in component:
-                if not re.match(r'^(?:\d+(?:\.\d+)?_[A-Za-z0-9+.\-()]+_\d+(?:\.\d+)?|\d+(?:\.\d+)?_[A-Za-z0-9+.\-()]+|[A-Za-z0-9+.\-()]+_\d+(?:\.\d+)?|[A-Za-z0-9+.\-()]+)$' , section) :
-                     raise ValueError
+
+                if not bool(acceptable_pattern_for_section.match(section)):
+                     raise ValueError("You can't make a reaction from string with this expression")
                 
                 splitted_section = section.split("_")
                 lenght = len(splitted_section)
                 if lenght == 3:
                     compound_info = {
                     "stoichiometric_coefficient" : float(splitted_section[0]),
-                    "substance" : splitted_section[1],
+                    "compound" : splitted_section[1],
                     "rate_dependency" : float(splitted_section[2])
                     }
-                    if component_counter == 0:
-                        self.reactants.append(compound_info)
-                    elif component_counter == 1:
-                        self.products.append(compound_info)
+
                 elif lenght == 2:
                     if re.match(r'^\d+(?:\.\d+)?_[A-Za-z0-9+.\-()]+$' , section) :
                         compound_info = {
                             "stoichiometric_coefficient" : float(splitted_section[0]),
-                            "substance" : splitted_section[1],
+                            "compound" : splitted_section[1],
                             "rate_dependency" : 1
                         }
-                        if component_counter == 0:
-                            self.reactants.append(compound_info)
-                        elif component_counter == 1:
-                            self.products.append(compound_info)
+
                     elif re.match(r'^[A-Za-z0-9+.\-()]+_\d+(?:\.\d+)?$' , section) :
                         compound_info = {
                             "stoichiometric_coefficient" : 1,
-                            "substance" : splitted_section[0],
+                            "compound" : splitted_section[0],
                             "rate_dependency" : float(splitted_section[1])
                         }
-                        if component_counter == 0:
-                            self.reactants.append(compound_info)
-                        elif component_counter == 1:
-                            self.products.append(compound_info)
+
                 elif lenght == 1:
                     compound_info = {
                     "stoichiometric_coefficient" : 1,
-                    "substance" : splitted_section[0],
+                    "compound" : splitted_section[0],
                     "rate_dependency" : 1
                     }
-                    if component_counter == 0:
-                        self.reactants.append(compound_info)
-                    elif component_counter == 1:
-                        self.products.append(compound_info)
+                if component_counter == 0:
+                    inputed_reactants.append(compound_info)
+                elif component_counter == 1:
+                    inputed_products.append(compound_info)
             component_counter +=1    
         counter = 0
         
-        for section in self.reactants :
-            reactant = section["substance"]
+        for section in inputed_reactants :
+            reactant = section["compound"]
             if re.match(r'^.*\.(s|g|l)$', reactant):  
-                
-                self.reactants[counter].update([("phase" , reactant[len(reactant)-1])])
-                self.reactants[counter]["substance"] = Compound(reactant[0:len(reactant)-2])
+                inputed_reactants[counter]["compound"] = Compound(formula=reactant[0:len(reactant)-2] , phase_point_list=[{"temperature" : T , "phase" : reactant[len(reactant)-1]}])
             elif re.match(r'^.*\.aq$', reactant):
-                self.reactants[counter].update([("phase" , "aq")])
-                self.reactants[counter]["substance"] = Compound(reactant[0:len(reactant)-3])
+                inputed_reactants[counter]["compound"] = Compound(formula=reactant[0:len(reactant)-3] , phase_point_list=[{"temperature" : T , "phase" : "aq"}])
             else:
-                self.reactants[counter].update([("phase" , None)])
-                self.reactants[counter]["substance"] = Compound(reactant)
+                inputed_reactants[counter]["compound"] = Compound(formula=reactant)
             counter += 1
         
         counter = 0
-        for section in self.products :
-            product = section["substance"]
+        for section in inputed_products :
+            product = section["compound"]
             if re.match(r'^.*\.(s|g|l)$', product):  
-                self.products[counter].update([("phase" , product[len(product)-1])])
-                self.products[counter]["substance"] = Compound(product[0:len(product)-2])
+                inputed_products[counter]["compound"] = Compound(formula=product[0:len(product)-2] , phase_point_list=[{"temperature" : T , "phase" : product[len(product)-1]}])
             elif re.match(r'^.*\.aq$', product):
-                self.products[counter].update([("phase" , "aq")])
-                self.products[counter]["substance"] = Compound(product[0:len(product)-3])
+                inputed_products[counter]["compound"] = Compound(formula=product[0:len(product)-3] , phase_point_list=[{"temperature" : T , "phase" : "aq"}])
             else:
-                self.products[counter].update([("phase" , None)])
-                self.products[counter]["substance"] = Compound(product)
+                inputed_products[counter]["compound"] = Compound(formula=product)
             counter += 1  
-        self.compounds = []
-        for compound in self.reactants :
-            compound.update({"type" : "reactant"})
-            self.compounds.append(compound)
-        for compound in self.products :
-            compound.update({"type" : "product"})
-            self.compounds.append(compound)  
-        return self
+        return cls(inputed_reactants , inputed_products , K , kf , kb , T)
     @classmethod
-    def from_simple_syntaxx(self , reaction , K=1, kf=1, kb=1):
-        self.K = K
-        self.kf = kf
-        self.kb = kb
-        self.equation = reaction
-        self.reactants = []
-        self.products = []
+    def from_string_simple_syntax(cls , reaction , K=1, kf=1, kb=1 , T=298):
+        '''
+        Creates reaction object from an string with any of the following formats:
+        A + 2B + ... > 3C + 2D-1 + ... \n
+        The prefix number represents the stoichiometric_coefficient and the default value is 1 \n
+        The suffix number represents rate_dependency or order of the reaction with respect to the reactant or product and the default vaule is 1 \n
+        B + C > CB
+        Unlike from_string_complex_syntax here your compound name shouldn't include numbers and + , -
+
+        To specify the phase use the following syntax:
+        A.g + 2B.s + ... > 3c.aq + 2D.g-1 + ...
+
+        The general order for each compound should follow the format below:
+        stoichiometric_coefficient(optional) + name(only alhpabet) + .phase(.s/.g/.l/.aq , optional) + rate_dependency(optional)
+        
+        Args:
+            reaction(string): The equation formula with the mentioned structure.
+
+            K(int or float): The equilibrium constant of reaction
+
+            kf(int or float): The forward reaction rate constant
+
+            kb(int or float): The backward reaction rate constant
+
+            T(int or float): The temperature of reaction and the constants(K, kf ,kb)
+        '''
         reformed_reaction = reaction.replace(" ","").split(">")
         splited_to_component_reaction = [component.split("+") for component in reformed_reaction] 
+        component_counter = 0
+        inputed_reactants = []
+        inputed_products = []
+        for component in splited_to_component_reaction:
+            counter = 0
+            acceptable_pattern_for_section = re.compile(
+                r'^(?:'
+                r'\d+(?:\.\d+)?[A-Za-z]+(?:\.[A-Za-z]+)?-?\d+(?:\.\d+)?|'  
+                r'\d+(?:\.\d+)?[A-Za-z]+(?:\.[A-Za-z]+)?|'                 
+                r'[A-Za-z]+(?:\.[A-Za-z]+)?-?\d+(?:\.\d+)?|'               
+                r'[A-Za-z]+(?:\.[A-Za-z]+)?'                         
+                r')$'   
+            )
+            for section in component:
+                if not bool(acceptable_pattern_for_section.match(section)):
+                     raise ValueError("You can't make a reaction from string with this expression")
+                else:
+                    start_of_name_index = 0
+                    end_of_name_index = 0
+                    def is_number(str):
+                        try:
+                            float(str) 
+                            return True
+                        except ValueError:
+                            return False
+                    # number + name + number
+                    if re.match(r'^\d+(?:\.\d+)?[A-Za-z]+(?:\.[A-Za-z]+)?-?\d+(?:\.\d+)?$' , section) :
+                        for endpoint in range(len(section)) :
+                            if is_number(section[:endpoint]) and (not is_number(section[:endpoint + 1])) :
+                                start_of_name_index = endpoint 
+                                break
+                        for startpoint in range(start_of_name_index , len(section)):
+                            if is_number(section[startpoint:]) :
+                                end_of_name_index = startpoint 
+                                break
+                        compound_info = {
+                            "stoichiometric_coefficient" : section[:start_of_name_index],
+                            "compound" : section[start_of_name_index:end_of_name_index],
+                            "rate_dependency" : section[end_of_name_index:]
+                            }
+                    # number + name
+                    elif re.match(r'^\d+(?:\.\d+)?[A-Za-z]+(?:\.[A-Za-z]+)?$' , section):
+                        end_of_name_index = len(section) 
+                        for endpoint in range(len(section)) :
+                            if is_number(section[:endpoint]) and (not is_number(section[:endpoint + 1])) :
+                                start_of_name_index = endpoint 
+                                break
+                        compound_info = {
+                            "stoichiometric_coefficient" : section[:start_of_name_index],
+                            "compound" : section[start_of_name_index:end_of_name_index],
+                            "rate_dependency" : 1
+                            }
+                    # name + number
+                    elif re.match(r'^[A-Za-z]+(?:\.[A-Za-z]+)*-?\d+(?:\.\d+)?$' , section):
+                        start_of_name_index = 0
+                        for startpoint in range(len(section)):
+                            if is_number(section[startpoint:]) :
+                                end_of_name_index = startpoint 
+                                break
+                        compound_info = {
+                            "stoichiometric_coefficient" : 1,
+                            "compound" : section[start_of_name_index:end_of_name_index],
+                            "rate_dependency" : section[end_of_name_index:]
+                            }
+                    # name
+                    else :
+                        compound_info = {
+                            "stoichiometric_coefficient" : 1,
+                            "compound" : section,
+                            "rate_dependency" : 1
+                            }
+                        
+                if component_counter == 0:
+                    inputed_reactants.append(compound_info)
+                elif component_counter == 1:
+                    inputed_products.append(compound_info)
+            component_counter +=1  
+        counter = 0
+        
+        for section in inputed_reactants :
+            reactant = section["compound"]
+            if re.match(r'^.*\.(s|g|l)$', reactant):  
+                inputed_reactants[counter]["compound"] = Compound(formula=reactant[0:len(reactant)-2] , phase_point_list=[{"temperature" : T , "phase" : reactant[len(reactant)-1]}])
+            elif re.match(r'^.*\.aq$', reactant):
+                inputed_reactants[counter]["compound"] = Compound(formula=reactant[0:len(reactant)-3] , phase_point_list=[{"temperature" : T , "phase" : "aq"}])
+            else:
+                inputed_reactants[counter]["compound"] = Compound(formula=reactant)
+            counter += 1
+        counter = 0
+        for section in inputed_products :
+            product = section["compound"]
+            if re.match(r'^.*\.(s|g|l)$', product):  
+                inputed_products[counter]["compound"] = Compound(formula=product[0:len(product)-2] , phase_point_list=[{"temperature" : T , "phase" : product[len(product)-1]}])
+            elif re.match(r'^.*\.aq$', product):
+                inputed_products[counter]["compound"] = Compound(formula=product[0:len(product)-3] , phase_point_list=[{"temperature" : T , "phase" : "aq"}])
+            else:
+                inputed_products[counter]["compound"] = Compound(formula=product)
+            counter += 1  
+        return cls(inputed_reactants , inputed_products , K , kf , kb , T)
     def __str__(self):
-        return self.equation
+        return self.__repr__()
     def __repr__(self):
         reaction_equation = ""
         counter = 0
         for compound in self.reactants :
             if int(compound["stoichiometric_coefficient"]) != 1:
-                reaction_equation += ( " " + str(int(compound["stoichiometric_coefficient"])) + compound["substance"].unicode_formula) 
+                reaction_equation += ( " " + str(int(compound["stoichiometric_coefficient"])) + compound["compound"].unicode_formula) 
             else:
-                reaction_equation += (" " + compound["substance"].unicode_formula)
-            if compound["phase"] != None:
-                reaction_equation += ( "(" + compound["phase"] + ")" )
+                reaction_equation += (" " + compound["compound"].unicode_formula)
+            if compound["compound"].phase(self.T) != None:
+                reaction_equation += ( "(" + compound["compound"].phase(self.T) + ")" )
             if counter < len(self.reactants) - 1:
                 reaction_equation += " +"
             counter += 1    
@@ -263,11 +391,11 @@ class Reaction:
         counter = 0
         for compound in self.products :
             if int(compound["stoichiometric_coefficient"]) != 1:
-                reaction_equation += (" " + str(int(compound["stoichiometric_coefficient"])) + compound["substance"].unicode_formula)
+                reaction_equation += (" " + str(int(compound["stoichiometric_coefficient"])) + compound["compound"].unicode_formula)
             else :
-                reaction_equation += (" " + compound["substance"].unicode_formula)
-            if compound["phase"] != None:
-                reaction_equation += ( "(" + compound["phase"] + ")" )
+                reaction_equation += (" " + compound["compound"].unicode_formula)
+            if compound["compound"].phase(self.T) != None:
+                reaction_equation += ( "(" + compound["compound"].phase(self.T) + ")" )
             if counter < len(self.products) - 1:
                 reaction_equation += " +"   
             counter += 1  
@@ -277,13 +405,13 @@ class Reaction:
         new_reactants = []
         new_products = []
         for compound in (self.compounds + other.compounds ):
-            compound_name = compound["substance"].formula
+            compound_name = compound["compound"].formula
             if not compound_name in new_compounds_name :
                 new_compounds_name.append(compound_name)
         for compound_name in new_compounds_name :
             stoichiometric_coefficient = 0
             for compound in (self.compounds + other.compounds ) :
-                if compound["substance"].formula == compound_name :
+                if compound["compound"].formula == compound_name :
                     if compound["type"] == "reactant" :
                         stoichiometric_coefficient += compound["stoichiometric_coefficient"]
                     elif compound["type"] == "product" :
@@ -313,7 +441,7 @@ class Reaction:
         try:   
             return Reaction(new_reaction)
         except:
-            return None
+            return None 
     def __iadd__(self , other):
         return self.__add__(other)
 class Enviromet():
