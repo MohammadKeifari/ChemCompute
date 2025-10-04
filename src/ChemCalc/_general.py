@@ -115,7 +115,7 @@ class Compound:
         else:
             return False
 class Reaction:
-    def __init__(self, reactants , products , K=1, kf=1, kb=1 , T=298):
+    def __init__(self, reactants , products , reactants_concentration = [] , products_concentration= [] , K=1, kf=1, kb=1 , T=298):
         '''
         creates a reaction object.
 
@@ -128,6 +128,13 @@ class Reaction:
                 - stoichiometric_coefficient(int or float > 0) : the stoichiometric coefficient of the product
                 - compoud(Compound object)d : A Compund object of the product
                 - rate_dependency(int or float) : order of the reaction with respect to the product
+            reactants_concentration(list of int or float): a list of concentration of reactants in the order they come in the reaction from left to right
+            products_concentration(list of int or float): a list of concentration of products in the order they come in the reaction from left to right
+            K(int or float): The equilibrium constant of reaction
+
+            kf(int or float): The forward reaction rate constant
+
+            kb(int or float): The backward reaction rate constant
         '''
         self.K = K
         self.kf = kf
@@ -136,16 +143,22 @@ class Reaction:
         self.products = products
         self.T = T
         self.compounds = []
+        counter = 0 
         for compound in self.reactants :
+            compound.update({"concentration" : reactants_concentration[counter]})
             reactant = compound.copy()
             reactant.update({"type" : "reactant"})
             self.compounds.append(reactant)
+            counter += 1
+        counter = 0
         for compound in self.products :
+            compound.update({"concentration" : products_concentration[counter]})
             product = compound.copy()
             product.update({"type" : "product"})
             self.compounds.append(product)
+            counter += 1
     @classmethod
-    def from_string_complex_syntax(cls, reaction, K=1, kf=1, kb=1 , T = 298):
+    def from_string_complex_syntax(cls, reaction , concentrations , K=1, kf=1, kb=1 , T = 298):
         '''
         Creates reaction object from an string with any of the following formats:
         A & 2_B & ... > 3_C & 2_D_-1 & ... \n
@@ -160,6 +173,8 @@ class Reaction:
         Args:
             reaction(string): The equation formula with the mentioned structure.
 
+            concentrations(list of int or float): the list of concentration of reactants and products in the order they come in the reaction from left to right
+            
             K(int or float): The equilibrium constant of reaction
 
             kf(int or float): The forward reaction rate constant
@@ -170,9 +185,9 @@ class Reaction:
 
         reformed_reaction = reaction.replace(" ","").split(">")
         splited_to_component_reaction = [component.split("&") for component in reformed_reaction] 
-        component_counter = 0
         inputed_reactants = []
         inputed_products = []
+        component_counter = 0
         for component in splited_to_component_reaction:
             counter = 0
             acceptable_pattern_for_section = re.compile(
@@ -243,9 +258,11 @@ class Reaction:
             else:
                 inputed_products[counter]["compound"] = Compound(formula=product)
             counter += 1  
-        return cls(inputed_reactants , inputed_products , K , kf , kb , T)
+        reactants_concentration = concentrations[:len(inputed_reactants)]
+        products_concentrations = concentrations[len(inputed_reactants):]
+        return cls(inputed_reactants , inputed_products, reactants_concentration , products_concentrations , K , kf , kb , T)
     @classmethod
-    def from_string_simple_syntax(cls , reaction , K=1, kf=1, kb=1 , T=298):
+    def from_string_simple_syntax(cls , reaction , concentrations , K=1, kf=1, kb=1 , T=298):
         '''
         Creates reaction object from an string with any of the following formats:
         A + 2B + ... > 3C + 2D-1 + ... \n
@@ -371,7 +388,9 @@ class Reaction:
             else:
                 inputed_products[counter]["compound"] = Compound(formula=product)
             counter += 1  
-        return cls(inputed_reactants , inputed_products , K , kf , kb , T)
+        reactants_concentration = concentrations[:len(inputed_reactants)]
+        products_concentrations = concentrations[len(inputed_reactants):]
+        return cls(inputed_reactants , inputed_products, reactants_concentration , products_concentrations , K , kf , kb , T)
     def __str__(self):
         return self.__repr__()
     def __repr__(self):
@@ -449,7 +468,7 @@ class Enviromet():
         if isinstance(reaction , Reaction):
             return True
         else:
-            raise ValueError
+            raise ValueError("You can't add none reaction object to the enviroment")
     def __init__(self , *reactions):
         self.reactions = []
         for reaction in reactions :
