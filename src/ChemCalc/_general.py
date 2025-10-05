@@ -326,9 +326,9 @@ class Reaction:
                                 end_of_name_index = startpoint 
                                 break
                         compound_info = {
-                            "stoichiometric_coefficient" : section[:start_of_name_index],
+                            "stoichiometric_coefficient" : float(section[:start_of_name_index]),
                             "compound" : section[start_of_name_index:end_of_name_index],
-                            "rate_dependency" : section[end_of_name_index:]
+                            "rate_dependency" : float(section[end_of_name_index:])
                             }
                     # number + name
                     elif re.match(r'^\d+(?:\.\d+)?[A-Za-z]+(?:\.[A-Za-z]+)?$' , section):
@@ -338,7 +338,7 @@ class Reaction:
                                 start_of_name_index = endpoint 
                                 break
                         compound_info = {
-                            "stoichiometric_coefficient" : section[:start_of_name_index],
+                            "stoichiometric_coefficient" : float(section[:start_of_name_index]),
                             "compound" : section[start_of_name_index:end_of_name_index],
                             "rate_dependency" : 1
                             }
@@ -352,7 +352,7 @@ class Reaction:
                         compound_info = {
                             "stoichiometric_coefficient" : 1,
                             "compound" : section[start_of_name_index:end_of_name_index],
-                            "rate_dependency" : section[end_of_name_index:]
+                            "rate_dependency" : float(section[end_of_name_index:])
                             }
                     # name
                     else :
@@ -463,17 +463,120 @@ class Reaction:
             return None 
     def __iadd__(self , other):
         return self.__add__(other)
-class Enviromet():
-    def _check_if_reaction(reaction):
+    def __iter__(self):
+        for compound in self.compounds:
+            yield compound
+class Enviroment():
+    def _check_if_reaction(self , reaction):
         if isinstance(reaction , Reaction):
             return True
         else:
-            raise ValueError("You can't add none reaction object to the enviroment")
-    def __init__(self , *reactions):
+            raise ValueError("You can't add non reaction object to the enviroment")
+        
+    def __init__(self , *reactions , T=298):
         self.reactions = []
         for reaction in reactions :
             if self._check_if_reaction(reaction):
                 self.reactions.append(reaction)
+        self.T = T
+        self.compounds = []
+        self.compounds_concentration = []
+        for reaction in reactions:
+            for compound in reaction.compounds:
+                compounds = [i["compound"] for i in self.compounds_concentration]
+                if compound["compound"] in compounds:
+                    index_in_compounds_concentration = compounds.index(compound["compound"])
+                    index_in_reaction = reaction.compounds.index(compound)
+                    self.compounds_concentration[index_in_compounds_concentration]["concentration"] += reaction.compounds[index_in_reaction]["concentration"]
+                else:
+                    index_in_reaction = reaction.compounds.index(compound)
+                    self.compounds_concentration.append({"compound" : compound["compound"] , "concentration" :reaction.compounds[index_in_reaction]["concentration"]})
+                    self.compounds.append(compound["compound"])
     def __iadd__(self , reaction):
         if self._check_if_reaction(reaction):
             self.reactions.append(reaction)
+            self.compounds = []
+            self.compounds_concentration = []
+            for reaction in self.reactions:
+                for compound in reaction.compounds:
+                    compounds = [i["compound"] for i in self.compounds_concentration]
+                    if compound["compound"] in compounds:
+                        index_in_compounds_concentration = compounds.index(compound["compound"])
+                        index_in_reaction = reaction.compounds.index(compound)
+                        self.compounds_concentration[index_in_compounds_concentration]["concentration"] += reaction.compounds[index_in_reaction]["concentration"]
+                    else:
+                        index_in_reaction = reaction.compounds.index(compound)
+                        self.compounds_concentration.append({"compound" : compound["compound"] , "concentration" :reaction.compounds[index_in_reaction]["concentration"]})
+                        self.compounds.append(compound["compound"])
+            return self
+    def __iter__(self):
+        for reaction in self.reactions:
+            yield reaction
+    def add(self , reaction):
+        if self._check_if_reaction(reaction):
+            self.reactions.append(reaction)
+            self.compounds = []
+            self.compounds_concentration = []
+            for reaction in self.reactions:
+                for compound in reaction.compounds:
+                    compounds = [i["compound"] for i in self.compounds_concentration]
+                    if compound["compound"] in compounds:
+                        index_in_compounds_concentration = compounds.index(compound["compound"])
+                        index_in_reaction = reaction.compounds.index(compound)
+                        self.compounds_concentration[index_in_compounds_concentration]["concentration"] += reaction.compounds[index_in_reaction]["concentration"]
+                    else:
+                        index_in_reaction = reaction.compounds.index(compound)
+                        self.compounds_concentration.append({"compound" : compound["compound"] , "concentration" :reaction.compounds[index_in_reaction]["concentration"]})
+                        self.compounds.append(compound["compound"])
+    @property
+    def reaction_by_index(self):
+        _reactions_by_index = []
+        for rxn in self.reactions :
+            reatants_index = []
+            for reactant in rxn.reactants:
+                index = self.compounds.index(reactant["compound"])
+                reatants_index.append(index)
+            products_index = []
+            for product in rxn.products:
+                index = self.compounds.index(product["compound"])
+                products_index.append(index)
+            _reactions_by_index.append([reatants_index , products_index])
+        return _reactions_by_index
+    @property
+    def stoichiometric_coefficient_by_reaction(self):
+        _stoichiometric_coefficient_by_reaction = []
+        for rxn in self.reactions :
+            reatants_index = []
+            for reactant in rxn.reactants:
+                reatants_index.append(reactant["stoichiometric_coefficient"])
+            products_index = []
+            for product in rxn.products:
+                products_index.append(product["stoichiometric_coefficient"])
+            _stoichiometric_coefficient_by_reaction.append([reatants_index , products_index])
+        return _stoichiometric_coefficient_by_reaction
+    @property
+    def rate_constants(self):
+        _rate_constants = []
+        for rxn in self.reactions :
+            _rate_constants.append([rxn.kf , rxn.kb])
+        return _rate_constants
+    @property
+    def rate_dependency_by_reaction(self):
+        _rate_dependency_by_reaction = []
+        for rxn in self.reactions :
+            reatants_index = []
+            for reactant in rxn.reactants:
+                reatants_index.append(reactant["rate_dependency"])
+            products_index = []
+            for product in rxn.products:
+                products_index.append(product["rate_dependency"])
+            _rate_dependency_by_reaction.append([reatants_index , products_index])
+        return _rate_dependency_by_reaction
+    @property
+    def compounds_unicode_formula(self):
+        return [compound.unicode_formula for compound in self.compounds]
+    def change_temperature():
+        pass
+
+    def __len__(self):
+        return len(self.reactions)
