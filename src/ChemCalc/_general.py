@@ -1,23 +1,32 @@
 import re
 class Compound: 
-    def __init__(self , formula  , phase_point_list=None , mp=None, bp=None ,scription=True):
-        '''
-        Creates a Compound Object based on formula, physical properties and chemical properties
+    """
+    Represents a chemical compound with formula, physical properties, and optional superscript/subscript formatting.
 
-        Arg:
-        formula(string): Compound chemical formula
-        scription(boolean) : If True the formula will be superscipted and subscripted --> unicode_formula
-        phase(list of dict): A list of phase point dictionaries. Each dictionary should have:
-            - phase(str): defines the phase of the compund at that temperature. must be one of:
-                - "s" : solid
-                - "g" : gas
-                - "l" : liquid
-                - "aq" : aqueous 
-            - temperature(int or float): the temperature of compound in that phase
-        mp(int or float): melting point
-        bp(int or float): boiling point
-        To determine the phase phase_point_list will have priority over mp and bp
-        '''
+    Attributes:
+        formula (str): The chemical formula of the compound.
+        unicode_formula (str): Unicode representation of the formula (with sub/superscripts if enabled).
+        phase_point_list (list[dict]): A list of phase data points, each as {"temperature": float, "phase": str}.
+        mp (float | None): Melting point of the compound (°C or K, depending on convention).
+        bp (float | None): Boiling point of the compound.
+    """
+
+    def __init__(self , formula  , phase_point_list=None , mp=None, bp=None ,scription=True):
+        """
+        Initialize a Compound object based on its formula, phase information, and thermal properties.
+
+        Args:
+            formula (str): The compound's chemical formula.
+            phase_point_list (list[dict], optional): List of phase points with the following keys:
+                - "phase" (str): One of {"s", "l", "g", "aq"}.
+                - "temperature" (float): The temperature associated with that phase.
+            mp (float, optional): Melting point temperature.
+            bp (float, optional): Boiling point temperature.
+            scription (bool, optional): If True, converts the formula into Unicode with subscripts/superscripts.
+        
+        Raises:
+            ValueError: If a phase in `phase_point_list` is not one of {"s", "l", "g", "aq"}.
+        """
         superscript_characters=["\u2070" ,"\u00b9" ,"\u00b2" ,"\u00b3" ,"\u2074" 
                                 ,"\u2075" ,"\u2076" ,"\u2077" ,"\u2078" ,"\u2079" 
                                 ,"\u207a" , "\u207b"]
@@ -28,6 +37,7 @@ class Compound:
         self.formula = formula
         if scription:
             def formula_to_unicode_formula(formula):
+                """Convert a normal formula string to Unicode format with subscripts/superscripts."""
                 unicode_formula = ""
                 if "+" in formula :
                     splitted_formula = formula.split("+")
@@ -76,15 +86,15 @@ class Compound:
         self.bp = bp
 
     def phase(self , temperature):
-        '''
-        Returns the phase of a compound in the specific temperature
+        """
+        Determine the physical phase of the compound at a given temperature.
 
-        Arg:
-        temperature(int or float): The temperature you want to know the phase of the compound in
+        Args:
+            temperature (float): Temperature to evaluate phase at.
 
         Returns:
-        phase:  the phase of a compound in the temperature
-        '''
+            str | None: One of {"s", "l", "g", "aq"} or None if phase cannot be determined.
+        """
         phase_point_list_temperatures = [phase_point["temperature"] for phase_point in self.phase_point_list]
         if temperature in phase_point_list_temperatures:
             return (self.phase_point_list[phase_point_list_temperatures.index(temperature)])["phase"]
@@ -108,34 +118,42 @@ class Compound:
         elif self.bp == None and self.mp == None :
             return None
     def __str__(self):
+        """Return the Unicode representation of the compound."""
         return self.unicode_formula
     def __eq__(self, value):
-        if self.unicode_formula == value.unicode_formula :
-            return True
-        else:
-            return False
+        """Compare compounds based on their Unicode formulas."""
+        return self.unicode_formula == value.unicode_formula :
+        
 class Reaction:
-    def __init__(self, reactants , products , reactants_concentration = [] , products_concentration= [] , K=1, kf=1, kb=1 , T=298):
-        '''
-        creates a reaction object.
+    """
+    Represents a reversible chemical reaction, with kinetic and equilibrium parameters.
+
+    Attributes:
+        reactants (list[dict]): Reactant data (coefficient, Compound, rate dependency).
+        products (list[dict]): Product data (coefficient, Compound, rate dependency).
+        K (float): Equilibrium constant.
+        kf (float): Forward reaction rate constant.
+        kb (float): Backward reaction rate constant.
+        T (float): Reaction temperature.
+        compounds (list[dict]): All species involved with concentrations and type.
+    """
+    def __init__(self, reactants , products , reactants_concentration , products_concentration , K=1, kf=1, kb=1 , T=298):
+        """
+        Initialize a Reaction object.
 
         Args:
-            reactants(list of dict): a list of reactants. Each dictionary should have:
-                - stoichiometric_coefficient(int or float > 0) : the stoichiometric coefficient of the reactant
-                - compoud(Compound object)d : A Compund object of the reactant
-                - rate_dependency(int or float) : order of the reaction with respect to the reactant
-            products(list of dict): a list of products. Each dictionary should have:
-                - stoichiometric_coefficient(int or float > 0) : the stoichiometric coefficient of the product
-                - compoud(Compound object)d : A Compund object of the product
-                - rate_dependency(int or float) : order of the reaction with respect to the product
-            reactants_concentration(list of int or float): a list of concentration of reactants in the order they come in the reaction from left to right
-            products_concentration(list of int or float): a list of concentration of products in the order they come in the reaction from left to right
-            K(int or float): The equilibrium constant of reaction
-
-            kf(int or float): The forward reaction rate constant
-
-            kb(int or float): The backward reaction rate constant
-        '''
+            reactants (list[dict]): Each dict has:
+                - "stoichiometric_coefficient" (float)
+                - "compound" (Compound)
+                - "rate_dependency" (float)
+            products (list[dict]): Same structure as reactants.
+            reactants_concentration (list[float], optional): Reactant concentrations.
+            products_concentration (list[float], optional): Product concentrations.
+            K (float, optional): Equilibrium constant.
+            kf (float, optional): Forward rate constant.
+            kb (float, optional): Backward rate constant.
+            T (float, optional): Temperature (K).
+        """
         self.K = K
         self.kf = kf
         self.kb = kb
@@ -158,7 +176,7 @@ class Reaction:
             self.compounds.append(product)
             counter += 1
     @classmethod
-    def from_string_complex_syntax(cls, reaction , concentrations , K=1, kf=1, kb=1 , T = 298):
+    def from_string_complex_syntax(cls, reaction_str , concentrations = None , K=1, kf=1, kb=1 , T = 298):
         '''
         Creates reaction object from an string with any of the following formats:
         A & 2_B & ... > 3_C & 2_D_-1 & ... \n
@@ -183,7 +201,7 @@ class Reaction:
 
         '''
 
-        reformed_reaction = reaction.replace(" ","").split(">")
+        reformed_reaction = reaction_str.replace(" ","").split(">")
         splited_to_component_reaction = [component.split("&") for component in reformed_reaction] 
         inputed_reactants = []
         inputed_products = []
@@ -258,11 +276,13 @@ class Reaction:
             else:
                 inputed_products[counter]["compound"] = Compound(formula=product)
             counter += 1  
+        if concentrations == None:
+            concentrations = [0] * (len(inputed_reactants) + len(inputed_products))
         reactants_concentration = concentrations[:len(inputed_reactants)]
         products_concentrations = concentrations[len(inputed_reactants):]
         return cls(inputed_reactants , inputed_products, reactants_concentration , products_concentrations , K , kf , kb , T)
     @classmethod
-    def from_string_simple_syntax(cls , reaction , concentrations , K=1, kf=1, kb=1 , T=298):
+    def from_string_simple_syntax(cls , reaction_str , concentrations=None , K=1, kf=1, kb=1 , T=298):
         '''
         Creates reaction object from an string with any of the following formats:
         A + 2B + ... > 3C + 2D-1 + ... \n
@@ -288,7 +308,7 @@ class Reaction:
 
             T(int or float): The temperature of reaction and the constants(K, kf ,kb)
         '''
-        reformed_reaction = reaction.replace(" ","").split(">")
+        reformed_reaction = reaction_str.replace(" ","").split(">")
         splited_to_component_reaction = [component.split("+") for component in reformed_reaction] 
         component_counter = 0
         inputed_reactants = []
@@ -388,12 +408,17 @@ class Reaction:
             else:
                 inputed_products[counter]["compound"] = Compound(formula=product)
             counter += 1  
+
+        if concentrations == None:
+            concentrations = [0] * (len(inputed_reactants) + len(inputed_products))
         reactants_concentration = concentrations[:len(inputed_reactants)]
         products_concentrations = concentrations[len(inputed_reactants):]
         return cls(inputed_reactants , inputed_products, reactants_concentration , products_concentrations , K , kf , kb , T)
     def __str__(self):
+        """Return a concise representation of the reaction."""
         return self.__repr__()
     def __repr__(self):
+        """Return a concise representation of the reaction."""
         reaction_equation = ""
         counter = 0
         for compound in self.reactants :
@@ -467,13 +492,50 @@ class Reaction:
         for compound in self.compounds:
             yield compound
 class Enviroment():
+    """
+    Represents a chemical environment containing multiple reactions and compounds.
+
+    The `Enviroment` class acts as a container for multiple `Reaction` objects,
+    automatically managing compound lists, concentration aggregation, and access
+    to kinetic or stoichiometric information for simulation or analysis.
+
+    Attributes:
+        reactions (list[Reaction]): List of `Reaction` objects within the environment.
+        compounds_concentration (list[dict]): List of dictionaries, each with:
+            - "compound" (Compound): Compound object.
+            - "concentration" (float): Current concentration value.
+        compounds (list[Compound]): Unique list of all compounds appearing in any reaction.
+        T (float): System temperature in Kelvin.
+    """
     def _check_if_reaction(self , reaction):
+        """
+        Validate whether the provided object is a `Reaction` instance.
+
+        Args:
+            reaction (Reaction): Object to validate.
+
+        Returns:
+            bool: True if the object is a valid Reaction.
+
+        Raises:
+            ValueError: If `reaction` is not an instance of `Reaction`.
+        """
         if isinstance(reaction , Reaction):
             return True
         else:
-            raise ValueError("You can't add non reaction object to the enviroment")
+            raise ValueError("Only Reaction objects can be added to Enviroment.")
         
     def __init__(self , *reactions , T=298):
+        """
+        Initialize the environment and add one or more reactions.
+
+        Args:
+            *reactions (Reaction): Variable number of Reaction objects.
+            T (float, optional): Temperature of the environment (K). Default is 298 K.
+
+        Raises:
+            ValueError: If any argument is not a Reaction object.
+        """
         self.reactions = []
         for reaction in reactions :
             if self._check_if_reaction(reaction):
@@ -493,6 +555,18 @@ class Enviroment():
                     self.compounds_concentration.append({"compound" : compound["compound"] , "concentration" :reaction.compounds[index_in_reaction]["concentration"]})
                     self.compounds.append(compound["compound"])
     def __iadd__(self , reaction):
+        """
+        Add a reaction to the environment using the += operator.
+
+        Args:
+            reaction (Reaction): Reaction to add.
+
+        Returns:
+            Enviroment: The updated environment instance.
+
+        Raises:
+            ValueError: If `reaction` is not a valid Reaction object.
+        """
         if self._check_if_reaction(reaction):
             self.reactions.append(reaction)
             self.compounds = []
@@ -510,9 +584,24 @@ class Enviroment():
                         self.compounds.append(compound["compound"])
             return self
     def __iter__(self):
+        """
+        Iterate through all reactions in the environment.
+
+        Yields:
+            Reaction: Each reaction in the environment.
+        """
         for reaction in self.reactions:
             yield reaction
     def add(self , reaction):
+        """
+        Add a new reaction to the environment manually.
+
+        Args:
+            reaction (Reaction): The reaction to add.
+
+        Raises:
+            ValueError: If `reaction` is not a valid Reaction object.
+        """
         if self._check_if_reaction(reaction):
             self.reactions.append(reaction)
             self.compounds = []
@@ -530,6 +619,12 @@ class Enviroment():
                         self.compounds.append(compound["compound"])
     @property
     def reaction_by_index(self):
+        """
+        Map each reaction’s reactants and products to their indices in the environment’s compound list.
+
+        Returns:
+            list[list[list[int]]]: A list of [reactants_index, products_index] for each reaction.
+        """
         _reactions_by_index = []
         for rxn in self.reactions :
             reatants_index = []
@@ -544,6 +639,12 @@ class Enviroment():
         return _reactions_by_index
     @property
     def stoichiometric_coefficient_by_reaction(self):
+        """
+        Return stoichiometric coefficients for all reactions.
+
+        Returns:
+            list[list[list[float]]]: A list of [reactant_coefficients, product_coefficients] per reaction.
+        """
         _stoichiometric_coefficient_by_reaction = []
         for rxn in self.reactions :
             reatants_index = []
@@ -556,12 +657,25 @@ class Enviroment():
         return _stoichiometric_coefficient_by_reaction
     @property
     def rate_constants(self):
+        """
+        Get all forward and backward rate constants for each reaction.
+
+        Returns:
+            list[list[float]]: Each entry is [kf, kb] for a reaction.
+        """
         _rate_constants = []
         for rxn in self.reactions :
             _rate_constants.append([rxn.kf , rxn.kb])
         return _rate_constants
     @property
     def rate_dependency_by_reaction(self):
+        """
+        Return the kinetic order (rate dependency) for reactants and products in each reaction.
+
+        Returns:
+            list[list[list[float]]]: Each entry contains:
+                [ [reactant_rate_dependencies], [product_rate_dependencies] ]
+        """
         _rate_dependency_by_reaction = []
         for rxn in self.reactions :
             reatants_index = []
@@ -574,9 +688,48 @@ class Enviroment():
         return _rate_dependency_by_reaction
     @property
     def compounds_unicode_formula(self):
+        """
+        Get the Unicode formulas of all compounds in the environment.
+
+        Returns:
+            list[str]: List of compound Unicode formula strings.
+        """
         return [compound.unicode_formula for compound in self.compounds]
+
+    @property
+    def concentrations(self):
+        """
+        Retrieve the current concentrations of all compounds in the environment.
+
+        Returns:
+            list[float]: List of compound concentrations in the same order as `self.compounds`.
+        """
+        return [dict["concentration"] for dict in self.compounds_concentration]
+
+    @concentrations.setter
+    def concentrations(self , value):
+        """
+        Update the concentration values for all compounds.
+
+        Args:
+            value (list[float]): New concentration values corresponding to each compound.
+
+        Raises:
+            ValueError: If input is not a list or its length doesn’t match compound count.
+        """
+        if not(type(value) == list and len(value) == len(self.compounds_concentration)):
+            raise ValueError("The concentrations property should be a list and half the same lenght as the number of compounds")
+        for i in range(len(self.compounds_concentration)):
+            self.compounds_concentration[i]["concentration"] = value[i]
+            
     def change_temperature():
         pass
 
     def __len__(self):
+        """
+        Get the number of reactions currently in the environment.
+
+        Returns:
+            int: Count of reactions.
+        """
         return len(self.reactions)
