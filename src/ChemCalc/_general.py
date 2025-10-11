@@ -1,4 +1,5 @@
 import re
+import numpy as np
 class Compound: 
     """
     Represents a chemical compound with formula, physical properties, and optional superscript/subscript formatting.
@@ -122,7 +123,7 @@ class Compound:
         return self.unicode_formula
     def __eq__(self, value):
         """Compare compounds based on their Unicode formulas."""
-        return self.unicode_formula == value.unicode_formula :
+        return self.unicode_formula == value.unicode_formula 
         
 class Reaction:
     """
@@ -692,6 +693,55 @@ class Enviroment():
                 products_index.append(index)
             _reactions_by_index.append([reatants_index , products_index])
         return _reactions_by_index
+    
+    @property
+    def stoichiometric_coefficient_array(self):
+        """
+        Generate the stoichiometric coefficient matrix for all reactions in the environment.
+
+        This property constructs a matrix that represents how each compound participates
+        in each reaction. Each row corresponds to a reaction, and each column corresponds
+        to a compound in `self.compounds`.
+
+        - Reactants are assigned **positive** stoichiometric coefficients.
+        - Products are assigned **negative** stoichiometric coefficients.
+
+        This matrix is often used in rate law calculations, reaction network modeling,
+        and dynamic simulations of multi-reaction systems.
+
+        Returns:
+            numpy.ndarray: A 2D array of shape `(n_reactions, n_compounds)` where each
+            entry `[i, j]` represents the stoichiometric coefficient of compound `j`
+            in reaction `i`. Positive values indicate reactants, and negative values
+            indicate products.
+
+        Example:
+            Suppose an environment contains:
+                Reaction 1: A + 2B ⇌ C  
+                Reaction 2: C ⇌ D + E  
+
+            And `self.compounds = [A, B, C, D, E]`.
+
+            Then:
+                >>> env.stoichiometric_coefficient_array
+                array([
+                    [ 1,  2, -1,  0,  0],
+                    [ 0,  0,  1, -1, -1]
+                ])
+        """
+        _stoichiometric_coefficient_array = []
+        for rxn in self.reactions :
+            reaction_stoichiometric_coefficients = [0] * len(self.compounds) 
+            for reactant in rxn.reactants:
+                index = self.compounds.index(reactant["compound"])
+                reaction_stoichiometric_coefficients[index] += reactant["stoichiometric_coefficient"]
+            for product in rxn.products:
+                index = self.compounds.index(product["compound"])
+                reaction_stoichiometric_coefficients[index] += product["stoichiometric_coefficient"] * -1
+            _stoichiometric_coefficient_array.append(reaction_stoichiometric_coefficients)
+        output_array = np.array(_stoichiometric_coefficient_array)
+        return output_array
+    
     @property
     def stoichiometric_coefficient_by_reaction(self):
         """
@@ -711,6 +761,43 @@ class Enviroment():
             _stoichiometric_coefficient_by_reaction.append([reatants_index , products_index])
         return _stoichiometric_coefficient_by_reaction
     @property
+    def rate_constants_array(self):
+        """
+        Retrieve all forward and backward rate constants for reactions in the environment.
+
+        This property aggregates the kinetic constants from each reaction object and
+        returns them as a NumPy array, where each row corresponds to a reaction.
+
+        Each row contains two values:
+        - The **forward rate constant (kf)** — associated with the forward reaction direction.
+        - The **backward rate constant (kb)** — associated with the reverse reaction direction.
+
+        This structure is useful for numerical solvers and kinetic simulations where
+        reaction rates are computed using vectorized operations.
+
+        Returns:
+            numpy.ndarray: A 2D array of shape `(n_reactions, 2)`, where each entry
+            `[i, 0]` is the forward rate constant `kf` and `[i, 1]` is the backward
+            rate constant `kb` for reaction `i`.
+
+        Example:
+            Suppose an environment contains 2 reactions:
+                Reaction 1: A ⇌ B     with kf = 0.3, kb = 0.1  
+                Reaction 2: B ⇌ C     with kf = 0.5, kb = 0.2  
+
+            Then:
+                >>> env.rate_constants_array
+                array([
+                    [0.3, 0.1],
+                    [0.5, 0.2]
+                ])
+        """
+        _rate_constants = []
+        for rxn in self.reactions :
+            _rate_constants.append([rxn.kf , rxn.kb])
+        output_array = np.array(_rate_constants)
+        return output_array
+    @property
     def rate_constants(self):
         """
         Get all forward and backward rate constants for each reaction.
@@ -722,6 +809,57 @@ class Enviroment():
         for rxn in self.reactions :
             _rate_constants.append([rxn.kf , rxn.kb])
         return _rate_constants
+    @property
+    def rate_dependency_array(self):
+        """
+        Retrieve the kinetic order (rate dependency) of each compound for all reactions.
+
+        This property constructs a 3D NumPy array representing how the reaction rate
+        depends on the concentration of each compound, for both the forward and reverse
+        directions of every reaction in the environment.
+
+        For each reaction, two vectors are generated:
+        - **Reactant rate dependencies** — indicate the kinetic order of each compound
+            in the forward reaction rate expression.
+        - **Product rate dependencies** — indicate the kinetic order of each compound
+            in the backward (reverse) reaction rate expression.
+
+        Each vector’s length matches the total number of compounds in the environment.
+        Compounds not participating in a given reaction have a dependency value of `0`.
+
+        Returns:
+            numpy.ndarray: A 3D array of shape `(n_reactions, 2, n_compounds)`, where:
+                - `[:, 0, :]` corresponds to reactant rate dependencies.
+                - `[:, 1, :]` corresponds to product rate dependencies.
+
+        Example:
+            Suppose the environment contains compounds [A, B, C] and one reaction:
+                A + 2B2 > C
+                rate_forward ∝ [A]^1 [B]^2
+                rate_backward ∝ [C]^1
+
+            Then:
+                >>> env.rate_dependency_array
+                array([
+                    [
+                        [1, 2, 0],   # Reactant dependencies (A, B, C)
+                        [0, 0, 1]    # Product dependencies (A, B, C)
+                    ]
+                ])
+        """
+        _rate_dependency_array = []
+        for rxn in self.reactions :
+            reactants_rate_dependency =  [0] * len(self.compounds)
+            for reactant in rxn.reactants:
+                index = self.compounds.index(reactant["compound"])
+                reactants_rate_dependency[index] = reactant["rate_dependency"]
+            products_rate_dependency= [0] * len(self.compounds)
+            for product in rxn.products:
+                index = self.compounds.index(product["compound"])
+                products_rate_dependency[index] = product["rate_dependency"]
+            _rate_dependency_array.append([reactants_rate_dependency , products_rate_dependency])
+        output_array = np.array(_rate_dependency_array)
+        return output_array
     @property
     def rate_dependency_by_reaction(self):
         """
@@ -751,6 +889,36 @@ class Enviroment():
         """
         return [compound.unicode_formula for compound in self.compounds]
 
+    @property
+    def concentrations_array(self):
+        """
+        Retrieve the current concentrations of all compounds in the environment.
+
+        This property provides a NumPy array containing the concentration values
+        of every compound tracked in the environment. The order of concentrations
+        directly corresponds to the order of compounds in `self.compounds`.
+
+        This representation is useful for numerical computations, matrix operations,
+        and kinetic simulations where concentration vectors are required.
+
+        Returns:
+            numpy.ndarray: A 1D array of compound concentrations (in mol/L or the
+            system’s chosen units), ordered consistently with `self.compounds`.
+
+        Example:
+            Suppose the environment contains:
+                self.compounds = [A, B, C]
+                self.compounds_concentration = [
+                    {"compound": A, "concentration": 0.5},
+                    {"compound": B, "concentration": 0.2},
+                    {"compound": C, "concentration": 0.8}
+                ]
+
+            Then:
+                >>> env.concentrations_array
+                array([0.5, 0.2, 0.8])
+        """
+        return np.array([dict["concentration"] for dict in self.compounds_concentration])
     @property
     def concentrations(self):
         """
