@@ -311,7 +311,7 @@ class Reaction:
             - Phase can be added as .s, .l, .g, or .aq
 
         Example:
-            "2H2.g + O2.g > 2H2O.l"
+            "2A.g + B.g2 > C.l-1"
 
         Args:
             reaction_str (str): Reaction formula.
@@ -523,7 +523,7 @@ class Reaction:
             else:
                 new_reaction += (product)
             counter += 1   
-        return Reaction(new_reaction)
+        return Reaction.from_string_complex_syntax(new_reaction)
 
     def __iadd__(self , other):
         """
