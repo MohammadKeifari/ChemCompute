@@ -161,7 +161,7 @@ class KineticalCalculator:
             for checkpoint_t in checkpoint_time:
                 
                 if t <= checkpoint_t < t + self.accuracy:
-                    checkpoints.append([checkpoint_t , self.concentrations.copy()])
+                    checkpoints.append([checkpoint_t , concentrations.copy()])
                     
             t += self.accuracy
         if plot == "interactive" :
@@ -189,7 +189,7 @@ class KineticalCalculator:
             plt.close('all')
 
             del plt
-        checkpoints.append([time , self.concentrations])
+        checkpoints.append([time , concentrations.copy()])
         
         
         return checkpoints
@@ -285,7 +285,7 @@ class KineticalCalculator:
             for checkpoint_t in checkpoint_time:
                 
                 if t <= checkpoint_t < t + self.accuracy:
-                    checkpoints.append([new_conentratinos])
+                    checkpoints.append(new_conentratinos.copy())
             concentrations = new_conentratinos
             t += self.accuracy
         if plot == "interactive":
@@ -308,6 +308,7 @@ class KineticalCalculator:
                 plt.plot([0 , 0],[0 , 0] , color = colors[k], label = self.enviroment.compounds[k].unicode_formula)
             plt.savefig(directory)
             plt.close('all')
+            del plt
         checkpoints.append(concentrations)  
         return checkpoints
     def calculate_responsively(self, checkpoint_time = [] ,  animation_update_interval = 0.1 ):
@@ -365,8 +366,8 @@ class KineticalCalculator:
                 plt.xlabel("time")
                 plt.ylabel("concentration")
                 
-        
-        compounds_lenght = len(self.concentrations)
+        concentrations = self.concentrations.copy()
+        compounds_lenght = len(concentrations)
         checkpoints = [["time" , self.enviroment.compounds_unicode_formula]]
         def calculate_concentration_change():
             """Compute instantaneous concentration change per reaction step."""
@@ -403,19 +404,19 @@ class KineticalCalculator:
             t = self.accuracy * next(time)
             delta_concentration = calculate_concentration_change()
             for j in range(len(delta_concentration)):
-                concentration = self.concentrations[j] + delta_concentration[j]
+                concentration = concentrations[j] + delta_concentration[j]
                 if concentration < 0 :
-                    self.concentrations[j] = 0
+                    concentrations[j] = 0
                 else :
-                    self.concentrations[j] = concentration  
+                    concentrations[j] = concentration  
                
             if plot :
-                for k in range(len(self.concentrations)):
-                    plt.plot([t , t-self.accuracy],[self.concentrations[k] , self.concentrations[k]-delta_concentration[k]] , color = colors[k])
+                for k in range(len(concentrations)):
+                    plt.plot([t , t-self.accuracy],[concentrations[k] , concentrations[k]-delta_concentration[k]] , color = colors[k])
             for checkpoint_t in checkpoint_time:
                 
                 if t <= checkpoint_t < t + self.accuracy:
-                    checkpoints.append([checkpoint_t , self.concentrations.copy()])
+                    checkpoints.append([checkpoint_t , concentrations.copy()])
 
 
         ani = FuncAnimation(plt.gcf() , animate , interval = animation_update_interval , cache_frame_data=False)
@@ -438,7 +439,7 @@ class KineticalCalculator:
                     ani.resume()
                 else:
                     print("invalid_input")
-        checkpoints.append(["end" , self.concentrations])
+        checkpoints.append(["end" ,concentrations.copy()])
         return checkpoints
     def calculate_by_array_responsively(self  , checkpoint_time = [] ,animation_update_interval = 0.1 ):
         plot = True
@@ -498,7 +499,7 @@ class KineticalCalculator:
             for checkpoint_t in checkpoint_time:
                 
                 if t <= checkpoint_t < t + self.accuracy:
-                    checkpoints.append([new_conentratinos])
+                    checkpoints.append(new_conentratinos.copy())
             concentrations = new_conentratinos
 
         ani = FuncAnimation(plt.gcf() , animate , interval = animation_update_interval , cache_frame_data=False)        
