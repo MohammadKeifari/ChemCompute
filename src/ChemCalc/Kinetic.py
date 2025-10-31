@@ -259,22 +259,25 @@ class KineticalCalculator:
         stoichiometric_coefficient = self.enviroment.stoichiometric_coefficient_array
         rate_constants = self.enviroment.rate_constants_array
         time_interval = self.accuracy
+        eps = 1e-300
         def calculate_rf():
-            rf = np.multiply(
-                np.prod(np.power(np.tile(concentrations , (t_reactions , 1)) , rate_dependencies[: , 0 , :].reshape(-1 , t_compounds)), axis=1).reshape(-1,1) ,
-                rate_constants[: , 0].reshape(-1 , 1)
-            ).reshape(-1)* time_interval            
+            # rf = kf * prod_j concentrations[j]^order_fwd[j]
+            # Use log form for numerical stability and speed
+            log_c = np.log(concentrations + eps)
+            log_prod = rate_dependencies[:, 0, :] @ log_c  # (R,)
+            rf = np.exp(log_prod) * rate_constants[:, 0] * time_interval
             return rf
         def calculate_rb():
-            rb = np.multiply(
-                np.prod(np.power(np.tile(concentrations , (t_reactions , 1)) , rate_dependencies[: , 1 , :].reshape(-1 , t_compounds)) , axis=1).reshape(-1,1) ,
-                rate_constants[: , 1].reshape(-1 , 1)
-            ).reshape(-1)* time_interval            
+            log_c = np.log(concentrations + eps)
+            log_prod = rate_dependencies[:, 1, :] @ log_c  # (R,)
+            rb = np.exp(log_prod) * rate_constants[:, 1] * time_interval
             return rb
         def calculate_concentration_change():
-            rate = -(calculate_rf() - calculate_rb())            
-            concentration_change  = ((np.multiply(stoichiometric_coefficient , rate.reshape(-1 , 1))).sum(axis=0)).reshape(-1)
-            return concentration_change
+            # rate vector for reactions
+            rate = -(calculate_rf() - calculate_rb())  # (R,)
+            # concentration change = stoich^T @ rate
+            concentration_change = stoichiometric_coefficient.T @ rate  # (C,)
+            return concentration_change.reshape(-1)
         t = 0
         for i in range(int(time/self.accuracy+1)):
             new_conentratinos = np.add(concentrations, calculate_concentration_change())
@@ -466,22 +469,21 @@ class KineticalCalculator:
         stoichiometric_coefficient = self.enviroment.stoichiometric_coefficient_array
         rate_constants = self.enviroment.rate_constants_array
         time_interval = self.accuracy
+        eps = 1e-300
         def calculate_rf():
-            rf = np.multiply(
-                np.prod(np.power(np.tile(concentrations , (t_reactions , 1)) , rate_dependencies[: , 0 , :].reshape(-1 , t_compounds)), axis=1).reshape(-1,1) ,
-                rate_constants[: , 0].reshape(-1 , 1)
-            ).reshape(-1)* time_interval            
+            log_c = np.log(concentrations + eps)
+            log_prod = rate_dependencies[:, 0, :] @ log_c
+            rf = np.exp(log_prod) * rate_constants[:, 0] * time_interval
             return rf
         def calculate_rb():
-            rb = np.multiply(
-                np.prod(np.power(np.tile(concentrations , (t_reactions , 1)) , rate_dependencies[: , 1 , :].reshape(-1 , t_compounds)) , axis=1).reshape(-1,1) ,
-                rate_constants[: , 1].reshape(-1 , 1)
-            ).reshape(-1)* time_interval            
+            log_c = np.log(concentrations + eps)
+            log_prod = rate_dependencies[:, 1, :] @ log_c
+            rb = np.exp(log_prod) * rate_constants[:, 1] * time_interval
             return rb
         def calculate_concentration_change():
-            rate = -(calculate_rf() - calculate_rb())            
-            concentration_change  = ((np.multiply(stoichiometric_coefficient , rate.reshape(-1 , 1))).sum(axis=0)).reshape(-1)
-            return concentration_change
+            rate = -(calculate_rf() - calculate_rb())
+            concentration_change = stoichiometric_coefficient.T @ rate
+            return concentration_change.reshape(-1)
         
         time = count()
         def animate(i):
