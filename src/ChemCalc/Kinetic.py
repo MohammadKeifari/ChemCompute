@@ -146,7 +146,7 @@ class KineticalCalculator:
             new_conentratinos[new_conentratinos < 0] = 0
             if plot :
                 for k in range(len(self.concentrations)):
-                    plt.plot([t , t-self.accuracy],[new_conentratinos[k] , concentrations[k]] , color = colors[k])
+                    plt.plot([t , t-self.accuracy],[new_conentratinos[k] , concentrations[k]] , color = colors[k], linewidth=1, antialiased=False, marker='')
             for checkpoint_t in checkpoint_time:
                 
                 if t <= checkpoint_t < t + self.accuracy:
@@ -155,7 +155,7 @@ class KineticalCalculator:
             t += self.accuracy
         if plot == "interactive":
             for k in range(len(self.concentrations)):
-                plt.plot([0 , 0],[0 , 0] , color = colors[k], label = self.enviroment.compounds[k].unicode_formula)
+                plt.plot([0 , 0],[0 , 0] , color = colors[k], label = self.enviroment.compounds[k].unicode_formula, linewidth=1, antialiased=False, marker='')
             plt.legend()
             plt.show(block = False)
             
@@ -170,7 +170,7 @@ class KineticalCalculator:
                     print("Invalid input.")
         elif plot == "save" :
             for k in range(len(self.concentrations)):
-                plt.plot([0 , 0],[0 , 0] , color = colors[k], label = self.enviroment.compounds[k].unicode_formula)
+                plt.plot([0 , 0],[0 , 0] , color = colors[k], label = self.enviroment.compounds[k].unicode_formula, linewidth=1, antialiased=False, marker='')
             plt.savefig(directory)
             plt.close('all')
             del plt
@@ -267,7 +267,7 @@ class KineticalCalculator:
             new_conentratinos[new_conentratinos < 0] = 0
         
             for k in range(len(self.concentrations)):
-                plt.plot([t , t-self.accuracy],[new_conentratinos[k] , concentrations[k]] , color = colors[k])
+                plt.plot([t , t-self.accuracy],[new_conentratinos[k] , concentrations[k]] , color = colors[k], linewidth=1, antialiased=False, marker='')
                 
             for checkpoint_t in checkpoint_time:
                 
@@ -278,7 +278,7 @@ class KineticalCalculator:
         ani = FuncAnimation(plt.gcf() , animate , interval = animation_update_interval , cache_frame_data=False)        
         if plot :
             for k in range(len(self.concentrations)):
-                plt.plot([0 , 0],[0 , 0] , color = colors[k], label = self.enviroment.compounds[k].unicode_formula)
+                plt.plot([0 , 0],[0 , 0] , color = colors[k], label = self.enviroment.compounds[k].unicode_formula, linewidth=1, antialiased=False, marker='')
 
             plt.legend()
             plt.show(block = False)
