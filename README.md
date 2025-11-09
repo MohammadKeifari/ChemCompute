@@ -37,21 +37,24 @@ cd ChemCalc
 pip install -e .
 ```
 
-Or add the `src` directory to your Python path:
+**Important:** After installation, you can import the package directly using:
 
 ```python
-import sys
-sys.path.insert(0, 'path/to/ChemCalc/src')
+from ChemCalc import Compound, Reaction, Enviroment
+from ChemCalc.Kinetic import KineticalCalculator
+from ChemCalc.Thermodynamic import EquilibriumCalculator
 ```
+
+The package must be installed (using `pip install -e .`) for these imports to work. Without installation, you would need to use `from src.ChemCalc import ...` instead.
 
 ## Quick Start
 
 ### Basic Usage
 
 ```python
-from src.ChemCalc import Compound, Reaction, Enviroment
-from src.ChemCalc.Kinetic import KineticalCalculator
-from src.ChemCalc.Thermodynamic import EquilibriumCalculator
+from ChemCalc import Compound, Reaction, Enviroment
+from ChemCalc.Kinetic import KineticalCalculator
+from ChemCalc.Thermodynamic import EquilibriumCalculator
 
 # Create compounds
 A = Compound("A")
@@ -279,8 +282,8 @@ equilibrium = eq_calc.fit_calculate(
 ### Example 1: Simple Reversible Reaction
 
 ```python
-from src.ChemCalc import Compound, Reaction, Enviroment
-from src.ChemCalc.Kinetic import KineticalCalculator
+from ChemCalc import Compound, Reaction, Enviroment
+from ChemCalc.Kinetic import KineticalCalculator
 
 # Create reaction: A ⇌ B
 rxn = Reaction.from_string_simple_syntax(
@@ -319,7 +322,7 @@ results = kc.calculate(time=20.0, checkpoint_time=[5.0, 10.0, 15.0, 20.0])
 ### Example 3: Equilibrium Calculation
 
 ```python
-from src.ChemCalc.Thermodynamic import EquilibriumCalculator
+from ChemCalc.Thermodynamic import EquilibriumCalculator
 
 # A + 2B ⇌ C
 rxn = Reaction.from_string_simple_syntax(

@@ -66,7 +66,7 @@ ChemCalc provides a powerful and flexible framework for:
 Create compounds with formulas, phases, and physical properties:
 
 ```python
-from src.ChemCalc import Compound
+from ChemCalc import Compound
 
 # Simple compound
 water = Compound("H2O")
@@ -83,7 +83,7 @@ ethanol = Compound("C2H5OH", mp=-114, bp=78)
 Define reactions using simple or complex syntax:
 
 ```python
-from src.ChemCalc import Reaction
+from ChemCalc import Reaction
 
 # Simple syntax
 rxn = Reaction.from_string_simple_syntax(
@@ -100,7 +100,7 @@ rxn = Reaction.from_string_simple_syntax(
 Simulate reaction kinetics over time:
 
 ```python
-from src.ChemCalc.Kinetic import KineticalCalculator
+from ChemCalc.Kinetic import KineticalCalculator
 
 kc = KineticalCalculator(accuracy=1e-3)
 kc.fit(env)
@@ -112,7 +112,7 @@ results = kc.calculate(time=10.0, plot="interactive")
 Calculate equilibrium concentrations using multiple algorithms:
 
 ```python
-from src.ChemCalc.Thermodynamic import EquilibriumCalculator
+from ChemCalc.Thermodynamic import EquilibriumCalculator
 
 eq_calc = EquilibriumCalculator(method_of_calculation="newton")
 equilibrium = eq_calc.fit_calculate(env, max_iter=1000, tol=1e-8)
@@ -131,9 +131,9 @@ For detailed installation instructions, see the [Installation Guide](installatio
 Here's a complete example to get you started:
 
 ```python
-from src.ChemCalc import Compound, Reaction, Enviroment
-from src.ChemCalc.Kinetic import KineticalCalculator
-from src.ChemCalc.Thermodynamic import EquilibriumCalculator
+from ChemCalc import Compound, Reaction, Enviroment
+from ChemCalc.Kinetic import KineticalCalculator
+from ChemCalc.Thermodynamic import EquilibriumCalculator
 
 # Create a simple reversible reaction: A ⇌ B
 rxn = Reaction.from_string_simple_syntax(
