@@ -29,7 +29,52 @@ class EquilibriumCalculator:
         return concentration_eq
 
     def fit(self, env: Enviroment):
-        self.env = env
+        """
+        Fit the calculator to a chemical environment for equilibrium calculations.
+        
+        This method prepares the calculator by storing the environment and generating
+        concentration equations based on the stoichiometry of all reactions. The
+        concentration equations represent how each compound's concentration changes
+        as a function of reaction extents.
+        
+        The fit method must be called before calling calculate(). After fitting,
+        the calculator is ready to solve for equilibrium concentrations.
+        
+        Parameters
+        ----------
+        env : Enviroment
+            The chemical environment containing:
+            - compounds: List of chemical compounds in the system
+            - reactions: List of chemical reactions with equilibrium constants
+            - concentrations: Initial concentrations of all compounds
+            - stoichiometric_coefficient_array: Matrix of stoichiometric coefficients
+            - T: Temperature of the system
+        
+        Returns
+        -------
+        None
+        
+        Notes
+        -----
+        - This method sets self.fitted to True, enabling the calculate() method
+        - Concentration equations are generated as symbolic strings representing
+          how concentrations depend on reaction extents (x1, x2, ...)
+        - The environment is stored as self.env for use in subsequent calculations
+        - Calling fit() again will overwrite the previous environment and equations
+        
+        Examples
+        --------
+        >>> from ChemCalc import Enviroment
+        >>> calculator = EquilibriumCalculator(method_of_calculation="bgd")
+        >>> env = Enviroment(...)  # Initialize environment with compounds and reactions
+        >>> calculator.fit(env)
+        >>> # Now calculate() can be called
+        >>> equilibrium_concentrations = calculator.calculate()
+        """
+        if isinstance(env, Enviroment):
+            self.env = env
+        else:
+            raise ValueError("The input should be an instance of Enviroment class")
         self.concentration_equation = self._generate_concentration_equations()
         self.fitted = True
     def calculate(self,
@@ -38,6 +83,66 @@ class EquilibriumCalculator:
                 tol: float = 1e-8,
                 backtrack_beta: float = 0.5,
                 min_concentration: float = 1e-12):
+        """
+        Calculate equilibrium concentrations for the fitted chemical system.
+        
+        This method solves for the equilibrium state by finding reaction extents
+        that satisfy the mass-action law (Q = K) for all reactions. It uses
+        numerical optimization to minimize the residual between the reaction
+        quotient (Q) and equilibrium constants (K).
+        
+        The method supports three different optimization algorithms:
+        - "bgd" (batch gradient descent): Processes all reactions simultaneously
+        - "sgd" (stochastic gradient descent): Processes reactions in random order
+        - "newton" (Newton's method): Uses second-order information for faster convergence
+        
+        Parameters
+        ----------
+        max_iter : int, optional
+            Maximum number of iterations for the optimization algorithm.
+            Default is 5000.
+        learning_rate : float, optional
+            Step size for gradient-based updates. Higher values may converge
+            faster but risk instability. Default is 0.1.
+        tol : float, optional
+            Convergence tolerance. The algorithm stops when the residual
+            norm falls below this value. Default is 1e-8.
+        backtrack_beta : float, optional
+            Backtracking line search parameter. Controls how aggressively
+            the step size is reduced when constraints are violated.
+            Default is 0.5.
+        min_concentration : float, optional
+            Minimum concentration threshold to prevent numerical issues
+            with logarithms. Concentrations below this are clamped.
+            Default is 1e-12.
+        
+        Returns
+        -------
+        list[float]
+            List of equilibrium concentrations (in the same order as
+            self.env.compounds). Concentrations are guaranteed to be
+            non-negative.
+        
+        Raises
+        ------
+        ValueError
+            If the environment has not been fitted using the fit() method.
+        
+        Notes
+        -----
+        - Solid and liquid phases are excluded from equilibrium expressions
+          (only gas and aqueous phases participate in mass-action law)
+        - The method uses backtracking line search to ensure non-negative
+          concentrations and objective function improvement
+        - Convergence is checked based on both residual norms and gradient norms
+        - The solution extents are stored in self.x_solution after calculation
+        
+        Examples
+        --------
+        >>> calculator = EquilibriumCalculator(method_of_calculation="bgd")
+        >>> calculator.fit(env)
+        >>> equilibrium_concentrations = calculator.calculate(max_iter=1000, tol=1e-10)
+        """
         if self.fitted == False:
             raise ValueError("Environment not fitted")
         if self.method_of_calculation == "bgd":
@@ -47,6 +152,80 @@ class EquilibriumCalculator:
         elif self.method_of_calculation == "newton":
             return self._calculate_by_newton(max_iter, learning_rate, tol, backtrack_beta, min_concentration)
         return None
+
+    def fit_calculate(self,
+                      env: Enviroment,
+                      max_iter: int = 5000,
+                      learning_rate: float = 0.1,
+                      tol: float = 1e-8,
+                      backtrack_beta: float = 0.5,
+                      min_concentration: float = 1e-12):
+        """
+        Fit the calculator to an environment and calculate equilibrium concentrations in one call.
+        
+        This is a convenience method that combines fit() and calculate() into a single
+        operation. It first fits the calculator to the provided environment, then
+        immediately calculates the equilibrium concentrations.
+        
+        This method is equivalent to calling:
+            calculator.fit(env)
+            equilibrium_concentrations = calculator.calculate(...)
+        
+        Parameters
+        ----------
+        env : Enviroment
+            The chemical environment containing:
+            - compounds: List of chemical compounds in the system
+            - reactions: List of chemical reactions with equilibrium constants
+            - concentrations: Initial concentrations of all compounds
+            - stoichiometric_coefficient_array: Matrix of stoichiometric coefficients
+            - T: Temperature of the system
+        max_iter : int, optional
+            Maximum number of iterations for the optimization algorithm.
+            Default is 5000.
+        learning_rate : float, optional
+            Step size for gradient-based updates. Higher values may converge
+            faster but risk instability. Default is 0.1.
+        tol : float, optional
+            Convergence tolerance. The algorithm stops when the residual
+            norm falls below this value. Default is 1e-8.
+        backtrack_beta : float, optional
+            Backtracking line search parameter. Controls how aggressively
+            the step size is reduced when constraints are violated.
+            Default is 0.5.
+        min_concentration : float, optional
+            Minimum concentration threshold to prevent numerical issues
+            with logarithms. Concentrations below this are clamped.
+            Default is 1e-12.
+        
+        Returns
+        -------
+        list[float]
+            List of equilibrium concentrations (in the same order as
+            env.compounds). Concentrations are guaranteed to be
+            non-negative.
+        
+        Notes
+        -----
+        - This method automatically calls fit() before calculate(), so the
+          environment does not need to be fitted beforehand
+        - The method supports the same optimization algorithms as calculate():
+          "bgd" (batch gradient descent), "sgd" (stochastic gradient descent),
+          or "newton" (Newton's method)
+        - Solid and liquid phases are excluded from equilibrium expressions
+          (only gas and aqueous phases participate in mass-action law)
+        - The solution extents are stored in self.x_solution after calculation
+        
+        Examples
+        --------
+        >>> from ChemCalc import Enviroment
+        >>> calculator = EquilibriumCalculator(method_of_calculation="bgd")
+        >>> env = Enviroment(...)  # Initialize environment with compounds and reactions
+        >>> # Fit and calculate in one step
+        >>> equilibrium_concentrations = calculator.fit_calculate(env, max_iter=1000, tol=1e-10)
+        """
+        self.fit(env)
+        return self.calculate(max_iter, learning_rate, tol, backtrack_beta, min_concentration)
 
     def _caculate_by_batch_gradient_descent(self,
                                             max_iter: int = 5000,
