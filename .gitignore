@@ -1,3 +1,4 @@
 .venv/
 src/ChemCalc/testcase.txt
 src/ChemCalc/test.py
+src/ChemCalc/plot.png
