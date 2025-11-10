@@ -1,4 +1,4 @@
-from _general import Enviroment
+from ._general import Enviroment
 import matplotlib
 import random
 from itertools import count
