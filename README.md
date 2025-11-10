@@ -6,6 +6,8 @@ A Python library for chemical reaction simulation, including kinetic modeling an
 
 - **Chemical Compound Representation**: Create and manage chemical compounds with formulas, phases, and physical properties
 - **Reaction Definition**: Define chemical reactions with reactants, products, stoichiometric coefficients, and rate constants
+- **Temperature-Dependent Calculations**: Automatic updates of rate constants and equilibrium constants using Arrhenius and van't Hoff equations
+- **Thermodynamic Properties**: Support for enthalpy, entropy, and activation energies for temperature-dependent simulations
 - **Kinetic Simulation**: Simulate time-dependent concentration changes using numerical integration
 - **Equilibrium Calculations**: Calculate equilibrium concentrations using multiple optimization algorithms:
   - Batch Gradient Descent (BGD)
@@ -135,6 +137,20 @@ rxn3 = Reaction.from_string_simple_syntax("A.g + B.l > C.aq")
 
 # With rate dependencies: A2 + B1 > C1
 rxn4 = Reaction.from_string_simple_syntax("A2 + B1 > C1")
+
+# With thermodynamic parameters for temperature-dependent calculations
+rxn5 = Reaction.from_string_simple_syntax(
+    "A > B",
+    concentrations=[1.0, 0.0],
+    K=2.0,
+    kf=0.5,
+    kb=0.25,
+    enthalpy=-50000,  # J/mol (exothermic)
+    entropy=-100,     # J/(mol·K)
+    activation_energy_forward=50000,   # J/mol
+    activation_energy_backward=100000, # J/mol
+    T=298
+)
 ```
 
 **From Complex Syntax:**
@@ -146,7 +162,12 @@ rxn = Reaction.from_string_complex_syntax(
     concentrations=[1.0, 1.0, 0.0, 0.0],
     K=1e5,
     kf=0.1,
-    kb=1e-6
+    kb=1e-6,
+    enthalpy=-75000,  # J/mol
+    entropy=-150,     # J/(mol·K)
+    activation_energy_forward=60000,   # J/mol
+    activation_energy_backward=135000, # J/mol
+    T=298
 )
 ```
 
@@ -167,6 +188,10 @@ rxn = Reaction(
     K=2.0,
     kf=0.5,
     kb=0.25,
+    enthalpy=-50000,  # Enthalpy change (J/mol)
+    entropy=-100,     # Entropy change (J/(mol·K))
+    activation_energy_forward=50000,   # Forward activation energy (J/mol)
+    activation_energy_backward=100000, # Backward activation energy (J/mol)
     T=298
 )
 ```
@@ -179,6 +204,42 @@ rxn = Reaction(
 - `kf`: Forward rate constant
 - `kb`: Backward rate constant
 - `T`: Temperature (Kelvin)
+- `enthalpy`: Enthalpy change of reaction (J/mol, default: 0)
+- `entropy`: Entropy change of reaction (J/(mol·K), default: 0)
+- `activation_energy_forward`: Forward activation energy (J/mol, default: 0)
+- `activation_energy_backward`: Backward activation energy (J/mol, default: 0)
+
+**Temperature-Dependent Calculations:**
+
+The Reaction class automatically updates rate constants and equilibrium constants when temperature changes:
+
+```python
+# Create reaction with thermodynamic parameters
+rxn = Reaction.from_string_simple_syntax(
+    "A > B",
+    K=2.0,
+    kf=0.5,
+    kb=0.25,
+    enthalpy=-50000,  # J/mol
+    activation_energy_forward=50000,   # J/mol
+    activation_energy_backward=100000, # J/mol
+    T=298  # Initial temperature
+)
+
+# Change temperature - K, kf, and kb are automatically updated
+rxn.T = 350  # New temperature in Kelvin
+
+# The rate constants and equilibrium constant are now recalculated
+# using Arrhenius and van't Hoff equations
+print(f"K at 350K: {rxn.K}")
+print(f"kf at 350K: {rxn.kf}")
+print(f"kb at 350K: {rxn.kb}")
+```
+
+The calculations use:
+
+- **Arrhenius equation** for rate constants: `k = k₀ * exp(-Ea/R * (1/T - 1/T₀))`
+- **van't Hoff equation** for equilibrium constant: `K = K₀ * exp(-ΔH/R * (1/T - 1/T₀))`
 
 ### Enviroment
 
@@ -197,6 +258,9 @@ env.concentrations = [1.0, 0.5, 0.0, 0.0]
 # Add reactions
 env.add(new_reaction)
 env += another_reaction
+
+# Change temperature - automatically propagates to all reactions
+env.T = 350  # All reactions update their K, kf, kb values
 ```
 
 **Key Properties:**
@@ -204,6 +268,7 @@ env += another_reaction
 - `compounds`: List of all unique compounds
 - `reactions`: List of reactions
 - `concentrations`: Current concentrations
+- `T`: Temperature (Kelvin). Setting this property updates all reactions in the environment
 - `stoichiometric_coefficient_array`: Stoichiometric matrix
 - `rate_constants_array`: Rate constants matrix
 
@@ -705,6 +770,70 @@ env = Enviroment(rxn1, T=298)
 env.add(rxn2)  # Add reaction
 env += rxn3    # Or use += operator
 ```
+
+### 9. Temperature-Dependent Calculations
+
+ChemCalc supports automatic temperature-dependent calculations for rate constants and equilibrium constants using fundamental thermodynamic equations.
+
+**Thermodynamic Parameters:**
+
+- **Enthalpy (ΔH)**: Enthalpy change of the reaction (J/mol)
+- **Entropy (ΔS)**: Entropy change of the reaction (J/(mol·K))
+- **Activation Energy Forward (Ea_f)**: Activation energy for forward reaction (J/mol)
+- **Activation Energy Backward (Ea_b)**: Activation energy for backward reaction (J/mol)
+
+**Automatic Updates:**
+
+When you change the temperature of a reaction or environment, the following values are automatically recalculated:
+
+1. **Rate Constants (kf, kb)**: Updated using the Arrhenius equation
+2. **Equilibrium Constant (K)**: Updated using the van't Hoff equation
+
+**Equations Used:**
+
+- **Arrhenius Equation**: `k = k₀ * exp(-Ea/R * (1/T - 1/T₀))`
+
+  - Where R = 8.3145 J/(mol·K) (gas constant)
+  - Ea is the activation energy
+  - T₀ is the reference temperature
+
+- **van't Hoff Equation**: `K = K₀ * exp(-ΔH/R * (1/T - 1/T₀))`
+  - Where ΔH is the enthalpy change
+  - T₀ is the reference temperature
+
+**Example Usage:**
+
+```python
+# Create reaction with thermodynamic parameters
+rxn = Reaction.from_string_simple_syntax(
+    "A > B",
+    K=2.0,
+    kf=0.5,
+    kb=0.25,
+    enthalpy=-50000,  # Exothermic reaction (J/mol)
+    entropy=-100,     # J/(mol·K)
+    activation_energy_forward=50000,   # J/mol
+    activation_energy_backward=100000, # J/mol
+    T=298  # Reference temperature (K)
+)
+
+print(f"At 298K: K={rxn.K:.3f}, kf={rxn.kf:.3f}, kb={rxn.kb:.3f}")
+
+# Increase temperature
+rxn.T = 350  # Automatically updates K, kf, kb
+
+print(f"At 350K: K={rxn.K:.3f}, kf={rxn.kf:.3f}, kb={rxn.kb:.3f}")
+
+# For environments, temperature change propagates to all reactions
+env = Enviroment(rxn1, rxn2, rxn3, T=298)
+env.T = 400  # All reactions update automatically
+```
+
+**Important Notes:**
+
+- If thermodynamic parameters (enthalpy, activation energies) are zero, the values remain unchanged when temperature changes
+- The calculations assume constant enthalpy and activation energy over the temperature range
+- For accurate results, use thermodynamic parameters appropriate for your temperature range
 
 ## Limitations and Notes
 

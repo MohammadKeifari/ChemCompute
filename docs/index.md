@@ -8,6 +8,8 @@ ChemCalc provides a powerful and flexible framework for:
 
 - **Chemical Compound Management**: Create and manage chemical compounds with formulas, phases, and physical properties
 - **Reaction Definition**: Define complex chemical reactions with multiple reactants and products
+- **Temperature-Dependent Calculations**: Automatic updates of rate constants and equilibrium constants using Arrhenius and van't Hoff equations
+- **Thermodynamic Properties**: Support for enthalpy, entropy, and activation energies for realistic temperature-dependent simulations
 - **Kinetic Simulation**: Simulate time-dependent concentration changes using numerical integration
 - **Equilibrium Calculations**: Calculate equilibrium concentrations using advanced optimization algorithms
 - **Phase Handling**: Support for solid, liquid, gas, and aqueous phases with temperature-dependent transitions
@@ -80,19 +82,44 @@ ethanol = Compound("C2H5OH", mp=-114, bp=78)
 
 ### ⚗️ Reaction Definition
 
-Define reactions using simple or complex syntax:
+Define reactions using simple or complex syntax with thermodynamic parameters:
 
 ```python
 from ChemCalc import Reaction
 
-# Simple syntax
+# Simple syntax with thermodynamic parameters
 rxn = Reaction.from_string_simple_syntax(
     "2A + B > 3C",
     concentrations=[1.0, 1.0, 0.0],
     K=10.0,
     kf=0.5,
-    kb=0.05
+    kb=0.05,
+    enthalpy=-50000,  # J/mol
+    entropy=-100,     # J/(mol·K)
+    activation_energy_forward=50000,   # J/mol
+    activation_energy_backward=100000  # J/mol
 )
+```
+
+### 🌡️ Temperature-Dependent Calculations
+
+Automatically update rate constants and equilibrium constants with temperature:
+
+```python
+# Create reaction with thermodynamic parameters
+rxn = Reaction.from_string_simple_syntax(
+    "A > B",
+    K=2.0,
+    kf=0.5,
+    kb=0.25,
+    enthalpy=-50000,
+    activation_energy_forward=50000,
+    activation_energy_backward=100000,
+    T=298
+)
+
+# Change temperature - K, kf, kb automatically update
+rxn.T = 350  # Uses Arrhenius and van't Hoff equations
 ```
 
 ### ⏱️ Kinetic Simulation

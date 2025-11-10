@@ -346,3 +346,437 @@ def test_unicode_formula_property(basic_env):
     uforms = basic_env.compounds_unicode_formula
     assert isinstance(uforms, list)
     assert all(isinstance(u, str) for u in uforms)
+
+
+# -------------------------
+# Thermodynamic Features Tests
+# -------------------------
+
+# ---------- Reaction Thermodynamic Parameters Tests ---------- #
+
+def test_reaction_init_with_thermodynamic_parameters():
+    """Test Reaction initialization with thermodynamic parameters."""
+    A = Compound("A")
+    B = Compound("B")
+    
+    reactants = [{"stoichiometric_coefficient": 1, "compound": A, "rate_dependency": 1}]
+    products = [{"stoichiometric_coefficient": 1, "compound": B, "rate_dependency": 1}]
+    
+    rxn = Reaction(
+        reactants, products,
+        [1.0], [0.0],
+        K=2.0,
+        kf=0.5,
+        kb=0.25,
+        enthalpy=-50000,
+        entropy=-100,
+        activation_energy_forward=50000,
+        activation_energy_backward=100000,
+        T=298
+    )
+    
+    assert rxn.enthalpy == -50000
+    assert rxn.entropy == -100
+    assert rxn.activation_energy_forward == 50000
+    assert rxn.activation_energy_backward == 100000
+    assert rxn.T == 298
+
+
+def test_reaction_from_string_simple_syntax_with_thermodynamic_parameters():
+    """Test creating reaction from simple syntax with thermodynamic parameters."""
+    rxn = Reaction.from_string_simple_syntax(
+        "A > B",
+        concentrations=[1.0, 0.0],
+        K=2.0,
+        kf=0.5,
+        kb=0.25,
+        enthalpy=-50000,
+        entropy=-100,
+        activation_energy_forward=50000,
+        activation_energy_backward=100000,
+        T=298
+    )
+    
+    assert rxn.enthalpy == -50000
+    assert rxn.entropy == -100
+    assert rxn.activation_energy_forward == 50000
+    assert rxn.activation_energy_backward == 100000
+    assert rxn.T == 298
+
+
+def test_reaction_from_string_complex_syntax_with_thermodynamic_parameters():
+    """Test creating reaction from complex syntax with thermodynamic parameters."""
+    rxn = Reaction.from_string_complex_syntax(
+        "A & B > C",
+        concentrations=[1.0, 1.0, 0.0],
+        K=10.0,
+        kf=0.5,
+        kb=0.05,
+        enthalpy=-75000,
+        entropy=-150,
+        activation_energy_forward=60000,
+        activation_energy_backward=135000,
+        T=298
+    )
+    
+    assert rxn.enthalpy == -75000
+    assert rxn.entropy == -150
+    assert rxn.activation_energy_forward == 60000
+    assert rxn.activation_energy_backward == 135000
+
+
+# ---------- Temperature Property Tests ---------- #
+
+def test_reaction_temperature_getter():
+    """Test getting reaction temperature."""
+    A = Compound("A")
+    B = Compound("B")
+    
+    reactants = [{"stoichiometric_coefficient": 1, "compound": A, "rate_dependency": 1}]
+    products = [{"stoichiometric_coefficient": 1, "compound": B, "rate_dependency": 1}]
+    
+    rxn = Reaction(reactants, products, [1.0], [0.0], T=350)
+    assert rxn.T == 350
+
+
+def test_reaction_temperature_setter_with_zero_thermodynamic_params():
+    """Test temperature setter when thermodynamic parameters are zero (no change expected)."""
+    A = Compound("A")
+    B = Compound("B")
+    
+    reactants = [{"stoichiometric_coefficient": 1, "compound": A, "rate_dependency": 1}]
+    products = [{"stoichiometric_coefficient": 1, "compound": B, "rate_dependency": 1}]
+    
+    rxn = Reaction(
+        reactants, products,
+        [1.0], [0.0],
+        K=2.0,
+        kf=0.5,
+        kb=0.25,
+        T=298
+    )
+    
+    original_K = rxn.K
+    original_kf = rxn.kf
+    original_kb = rxn.kb
+    
+    # Change temperature with zero thermodynamic parameters
+    rxn.T = 350
+    
+    # Values should remain unchanged
+    assert rxn.T == 350
+    assert rxn.K == original_K
+    assert rxn.kf == original_kf
+    assert rxn.kb == original_kb
+
+
+def test_reaction_temperature_setter_with_activation_energy():
+    """Test temperature setter updates rate constants using Arrhenius equation."""
+    A = Compound("A")
+    B = Compound("B")
+    
+    reactants = [{"stoichiometric_coefficient": 1, "compound": A, "rate_dependency": 1}]
+    products = [{"stoichiometric_coefficient": 1, "compound": B, "rate_dependency": 1}]
+    
+    R = 8.3145  # Gas constant
+    
+    rxn = Reaction(
+        reactants, products,
+        [1.0], [0.0],
+        K=2.0,
+        kf=0.5,
+        kb=0.25,
+        activation_energy_forward=50000,   # J/mol
+        activation_energy_backward=100000, # J/mol
+        T=298
+    )
+    
+    original_kf = rxn.kf
+    original_kb = rxn.kb
+    
+    # Change temperature
+    new_T = 350
+    rxn.T = new_T
+    
+    # Calculate expected values using Arrhenius equation
+    expected_kf = original_kf * np.exp((-50000 / R) * (1/new_T - 1/298))
+    expected_kb = original_kb * np.exp((-100000 / R) * (1/new_T - 1/298))
+    
+    assert rxn.T == new_T
+    assert np.isclose(rxn.kf, expected_kf, rtol=1e-5)
+    assert np.isclose(rxn.kb, expected_kb, rtol=1e-5)
+
+
+def test_reaction_temperature_setter_with_enthalpy():
+    """Test temperature setter updates equilibrium constant using van't Hoff equation."""
+    A = Compound("A")
+    B = Compound("B")
+    
+    reactants = [{"stoichiometric_coefficient": 1, "compound": A, "rate_dependency": 1}]
+    products = [{"stoichiometric_coefficient": 1, "compound": B, "rate_dependency": 1}]
+    
+    R = 8.3145  # Gas constant
+    
+    rxn = Reaction(
+        reactants, products,
+        [1.0], [0.0],
+        K=2.0,
+        kf=0.5,
+        kb=0.25,
+        enthalpy=-50000,  # J/mol (exothermic)
+        T=298
+    )
+    
+    original_K = rxn.K
+    
+    # Change temperature
+    new_T = 350
+    rxn.T = new_T
+    
+    # Calculate expected value using van't Hoff equation
+    expected_K = original_K * np.exp((-(-50000) / R) * (1/new_T - 1/298))
+    
+    assert rxn.T == new_T
+    assert np.isclose(rxn.K, expected_K, rtol=1e-5)
+
+
+def test_reaction_temperature_setter_with_all_thermodynamic_params():
+    """Test temperature setter updates all values when all thermodynamic parameters are set."""
+    A = Compound("A")
+    B = Compound("B")
+    
+    reactants = [{"stoichiometric_coefficient": 1, "compound": A, "rate_dependency": 1}]
+    products = [{"stoichiometric_coefficient": 1, "compound": B, "rate_dependency": 1}]
+    
+    R = 8.3145  # Gas constant
+    
+    rxn = Reaction(
+        reactants, products,
+        [1.0], [0.0],
+        K=2.0,
+        kf=0.5,
+        kb=0.25,
+        enthalpy=-50000,
+        entropy=-100,
+        activation_energy_forward=50000,
+        activation_energy_backward=100000,
+        T=298
+    )
+    
+    original_K = rxn.K
+    original_kf = rxn.kf
+    original_kb = rxn.kb
+    
+    # Change temperature
+    new_T = 400
+    rxn.T = new_T
+    
+    # Calculate expected values
+    expected_K = original_K * np.exp((-(-50000) / R) * (1/new_T - 1/298))
+    expected_kf = original_kf * np.exp((-50000 / R) * (1/new_T - 1/298))
+    expected_kb = original_kb * np.exp((-100000 / R) * (1/new_T - 1/298))
+    
+    assert rxn.T == new_T
+    assert np.isclose(rxn.K, expected_K, rtol=1e-5)
+    assert np.isclose(rxn.kf, expected_kf, rtol=1e-5)
+    assert np.isclose(rxn.kb, expected_kb, rtol=1e-5)
+
+
+def test_reaction_temperature_increase_increases_rate_constants():
+    """Test that increasing temperature increases rate constants (for positive activation energy)."""
+    A = Compound("A")
+    B = Compound("B")
+    
+    reactants = [{"stoichiometric_coefficient": 1, "compound": A, "rate_dependency": 1}]
+    products = [{"stoichiometric_coefficient": 1, "compound": B, "rate_dependency": 1}]
+    
+    rxn = Reaction(
+        reactants, products,
+        [1.0], [0.0],
+        kf=0.5,
+        kb=0.25,
+        activation_energy_forward=50000,
+        activation_energy_backward=100000,
+        T=298
+    )
+    
+    kf_298 = rxn.kf
+    kb_298 = rxn.kb
+    
+    rxn.T = 400
+    
+    # Rate constants should increase with temperature
+    assert rxn.kf > kf_298
+    assert rxn.kb > kb_298
+
+
+def test_reaction_temperature_exothermic_equilibrium_constant():
+    """Test that for exothermic reactions, K decreases with increasing temperature."""
+    A = Compound("A")
+    B = Compound("B")
+    
+    reactants = [{"stoichiometric_coefficient": 1, "compound": A, "rate_dependency": 1}]
+    products = [{"stoichiometric_coefficient": 1, "compound": B, "rate_dependency": 1}]
+    
+    rxn = Reaction(
+        reactants, products,
+        [1.0], [0.0],
+        K=2.0,
+        enthalpy=-50000,  # Exothermic (negative)
+        T=298
+    )
+    
+    K_298 = rxn.K
+    rxn.T = 400
+    
+    # For exothermic reactions, K decreases with temperature
+    assert rxn.K < K_298
+
+
+def test_reaction_temperature_endothermic_equilibrium_constant():
+    """Test that for endothermic reactions, K increases with increasing temperature."""
+    A = Compound("A")
+    B = Compound("B")
+    
+    reactants = [{"stoichiometric_coefficient": 1, "compound": A, "rate_dependency": 1}]
+    products = [{"stoichiometric_coefficient": 1, "compound": B, "rate_dependency": 1}]
+    
+    rxn = Reaction(
+        reactants, products,
+        [1.0], [0.0],
+        K=2.0,
+        enthalpy=50000,  # Endothermic (positive)
+        T=298
+    )
+    
+    K_298 = rxn.K
+    rxn.T = 400
+    
+    # For endothermic reactions, K increases with temperature
+    assert rxn.K > K_298
+
+
+# ---------- Environment Temperature Propagation Tests ---------- #
+
+def test_environment_temperature_getter():
+    """Test getting environment temperature."""
+    A = Compound("A")
+    B = Compound("B")
+    
+    reactants = [{"stoichiometric_coefficient": 1, "compound": A, "rate_dependency": 1}]
+    products = [{"stoichiometric_coefficient": 1, "compound": B, "rate_dependency": 1}]
+    
+    rxn = Reaction(reactants, products, [1.0], [0.0], T=350)
+    env = Enviroment(rxn, T=350)
+    
+    assert env.T == 350
+
+
+def test_environment_temperature_setter_propagates_to_reactions():
+    """Test that setting environment temperature propagates to all reactions."""
+    A = Compound("A")
+    B = Compound("B")
+    C = Compound("C")
+    
+    # Reaction 1
+    reactants1 = [{"stoichiometric_coefficient": 1, "compound": A, "rate_dependency": 1}]
+    products1 = [{"stoichiometric_coefficient": 1, "compound": B, "rate_dependency": 1}]
+    rxn1 = Reaction(reactants1, products1, [1.0], [0.0], T=298)
+    
+    # Reaction 2
+    reactants2 = [{"stoichiometric_coefficient": 1, "compound": B, "rate_dependency": 1}]
+    products2 = [{"stoichiometric_coefficient": 1, "compound": C, "rate_dependency": 1}]
+    rxn2 = Reaction(reactants2, products2, [0.0], [0.0], T=298)
+    
+    env = Enviroment(rxn1, rxn2, T=298)
+    
+    # Change environment temperature
+    env.T = 400
+    
+    # All reactions should have updated temperature
+    assert env.T == 400
+    assert rxn1.T == 400
+    assert rxn2.T == 400
+
+
+def test_environment_temperature_setter_updates_reaction_parameters():
+    """Test that environment temperature change updates reaction K, kf, kb values."""
+    A = Compound("A")
+    B = Compound("B")
+    
+    reactants = [{"stoichiometric_coefficient": 1, "compound": A, "rate_dependency": 1}]
+    products = [{"stoichiometric_coefficient": 1, "compound": B, "rate_dependency": 1}]
+    
+    rxn = Reaction(
+        reactants, products,
+        [1.0], [0.0],
+        K=2.0,
+        kf=0.5,
+        kb=0.25,
+        enthalpy=-50000,
+        activation_energy_forward=50000,
+        activation_energy_backward=100000,
+        T=298
+    )
+    
+    K_298 = rxn.K
+    kf_298 = rxn.kf
+    kb_298 = rxn.kb
+    
+    env = Enviroment(rxn, T=298)
+    env.T = 400
+    
+    # Reaction parameters should be updated
+    assert rxn.T == 400
+    assert rxn.K != K_298
+    assert rxn.kf != kf_298
+    assert rxn.kb != kb_298
+
+
+def test_environment_temperature_with_multiple_reactions():
+    """Test environment temperature propagation with multiple reactions having different parameters."""
+    A = Compound("A")
+    B = Compound("B")
+    C = Compound("C")
+    
+    # Reaction 1 with thermodynamic parameters
+    reactants1 = [{"stoichiometric_coefficient": 1, "compound": A, "rate_dependency": 1}]
+    products1 = [{"stoichiometric_coefficient": 1, "compound": B, "rate_dependency": 1}]
+    rxn1 = Reaction(
+        reactants1, products1,
+        [1.0], [0.0],
+        K=2.0,
+        kf=0.5,
+        kb=0.25,
+        enthalpy=-50000,
+        activation_energy_forward=50000,
+        T=298
+    )
+    
+    # Reaction 2 without thermodynamic parameters
+    reactants2 = [{"stoichiometric_coefficient": 1, "compound": B, "rate_dependency": 1}]
+    products2 = [{"stoichiometric_coefficient": 1, "compound": C, "rate_dependency": 1}]
+    rxn2 = Reaction(
+        reactants2, products2,
+        [0.0], [0.0],
+        K=1.5,
+        kf=0.3,
+        kb=0.2,
+        T=298
+    )
+    
+    K1_298 = rxn1.K
+    K2_298 = rxn2.K
+    
+    env = Enviroment(rxn1, rxn2, T=298)
+    env.T = 400
+    
+    # Both reactions should have updated temperature
+    assert rxn1.T == 400
+    assert rxn2.T == 400
+    
+    # Reaction 1 should have updated K (has enthalpy)
+    assert rxn1.K != K1_298
+    
+    # Reaction 2 K should remain same (no enthalpy)
+    assert rxn2.K == K2_298

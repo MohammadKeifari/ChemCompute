@@ -1,4 +1,5 @@
 import re
+import math
 import numpy as np
 class Compound: 
     """
@@ -134,6 +135,10 @@ class Reaction:
     It can be created manually or parsed from reaction strings written in either
     a simple or complex syntax.
 
+    The class supports temperature-dependent calculations through thermodynamic properties.
+    When the temperature is changed, rate constants and equilibrium constants are
+    automatically updated using the Arrhenius and van't Hoff equations.
+
     Attributes:
         reactants (list[dict]): List of reactant dictionaries, each containing:
             - "stoichiometric_coefficient" (float)
@@ -143,11 +148,32 @@ class Reaction:
         K (float): Equilibrium constant of the reaction.
         kf (float): Forward rate constant.
         kb (float): Backward rate constant.
-        T (float): Reaction temperature in Kelvin.
+        T (float): Reaction temperature in Kelvin. Setting this property automatically
+            updates K, kf, and kb based on thermodynamic parameters.
+        enthalpy (float): Enthalpy change of the reaction (J/mol). Used in van't Hoff
+            equation for temperature-dependent equilibrium constant calculations.
+        entropy (float): Entropy change of the reaction (J/(mol·K)).
+        activation_energy_forward (float): Activation energy of the forward reaction
+            (J/mol). Used in Arrhenius equation for temperature-dependent rate constant.
+        activation_energy_backward (float): Activation energy of the backward reaction
+            (J/mol). Used in Arrhenius equation for temperature-dependent rate constant.
         compounds (list[dict]): All involved species (reactants and products) with
             their concentration and type ("reactant" or "product").
     """
-    def __init__(self, reactants , products , reactants_concentration , products_concentration , K=1, kf=1, kb=1 , T=298):
+    def __init__(self,
+                 reactants : list[dict] ,
+                 products : list[dict] ,
+                 reactants_concentration : list[float] ,
+                 products_concentration : list[float] ,
+                 K : float = 1,
+                 enthalpy : float = 0,
+                 entropy : float = 0,
+                 kf : float = 1,
+                 kb : float = 1,
+                 activation_energy_forward : float = 0,
+                 activation_energy_backward : float = 0,
+                 T : float = 298):
+                 
         """
         Initialize a Reaction instance.
 
@@ -160,6 +186,10 @@ class Reaction:
             kf (float, optional): Forward rate constant. Defaults to 1.
             kb (float, optional): Backward rate constant. Defaults to 1.
             T (float, optional): Temperature in Kelvin. Defaults to 298.
+            enthalpy (float, optional): Enthalpy of the reaction. Defaults to 0.
+            entropy (float, optional): Entropy of the reaction. Defaults to 0.
+            activation_energy_forward (float, optional): Activation energy of the forward reaction. Defaults to 0.
+            activation_energy_backward (float, optional): Activation energy of the backward reaction. Defaults to 0.
         """
 
         self.K = K
@@ -167,8 +197,13 @@ class Reaction:
         self.kb = kb
         self.reactants = reactants
         self.products = products
-        self.T = T
+        self.enthalpy = enthalpy
+        self.entropy = entropy
+        self.activation_energy_forward = activation_energy_forward
+        self.activation_energy_backward = activation_energy_backward
+        self._T = T
         self.compounds = []
+        
         counter = 0 
         for compound in self.reactants :
             compound.update({"concentration" : reactants_concentration[counter]})
@@ -184,7 +219,17 @@ class Reaction:
             self.compounds.append(product)
             counter += 1
     @classmethod
-    def from_string_complex_syntax(cls, reaction_str , concentrations = None , K=1, kf=1, kb=1 , T = 298):
+    def from_string_complex_syntax(cls, reaction_str: str,
+                                   concentrations: list[float] = None,
+                                   K: float = 1,
+                                   enthalpy: float = 0,
+                                   entropy: float = 0,
+                                   kf: float = 1,
+                                   kb: float = 1,
+                                   activation_energy_forward: float = 0,
+                                   activation_energy_backward: float = 0,
+                                   T: float = 298):
+                                   
         """
         Create a Reaction object from a string with complex syntax.
 
@@ -208,6 +253,10 @@ class Reaction:
             kf (float, optional): Forward rate constant. Defaults to 1.
             kb (float, optional): Backward rate constant. Defaults to 1.
             T (float, optional): Temperature in Kelvin. Defaults to 298.
+            enthalpy (float, optional): Enthalpy of the reaction. Defaults to 0.
+            entropy (float, optional): Entropy of the reaction. Defaults to 0.
+            activation_energy_forward (float, optional): Activation energy of the forward reaction. Defaults to 0.
+            activation_energy_backward (float, optional): Activation energy of the backward reaction. Defaults to 0.
 
         Returns:
             Reaction: Parsed Reaction instance.
@@ -295,9 +344,32 @@ class Reaction:
             concentrations = [0] * (len(inputed_reactants) + len(inputed_products))
         reactants_concentration = concentrations[:len(inputed_reactants)]
         products_concentrations = concentrations[len(inputed_reactants):]
-        return cls(inputed_reactants , inputed_products, reactants_concentration , products_concentrations , K , kf , kb , T)
+        return cls(inputed_reactants ,
+                   inputed_products,
+                   reactants_concentration ,
+                   products_concentrations ,
+                   K ,
+                   enthalpy ,
+                   entropy , 
+                   kf , 
+                   kb , 
+                   activation_energy_forward , 
+                   activation_energy_backward ,
+                   T)
     @classmethod
-    def from_string_simple_syntax(cls , reaction_str , concentrations=None , K=1, kf=1, kb=1 , T=298):
+    def from_string_simple_syntax(cls,
+                                  reaction_str: str,
+                                  concentrations: list[float] = None,
+                                  K: float = 1,
+                                  enthalpy: float = 0,
+                                  entropy: float = 0,
+                                  kf: float = 1,
+                                  kb: float = 1,
+                                  activation_energy_forward: float = 0,
+                                  activation_energy_backward: float = 0,
+                                  T: float = 298):
+                                  
+                                  
         """
         Create a Reaction object from a string using simple syntax.
 
@@ -320,6 +392,10 @@ class Reaction:
             kf (float, optional): Forward rate constant. Defaults to 1.
             kb (float, optional): Backward rate constant. Defaults to 1.
             T (float, optional): Temperature in Kelvin. Defaults to 298.
+            enthalpy (float, optional): Enthalpy of the reaction. Defaults to 0.
+            entropy (float, optional): Entropy of the reaction. Defaults to 0.
+            activation_energy_forward (float, optional): Activation energy of the forward reaction. Defaults to 0.
+            activation_energy_backward (float, optional): Activation energy of the backward reaction. Defaults to 0.
 
         Returns:
             Reaction: Parsed Reaction instance.
@@ -432,7 +508,64 @@ class Reaction:
             concentrations = [0] * (len(inputed_reactants) + len(inputed_products))
         reactants_concentration = concentrations[:len(inputed_reactants)]
         products_concentrations = concentrations[len(inputed_reactants):]
-        return cls(inputed_reactants , inputed_products, reactants_concentration , products_concentrations , K , kf , kb , T)
+        return cls(inputed_reactants ,
+                   inputed_products,
+                   reactants_concentration ,
+                   products_concentrations ,
+                   K ,
+                   enthalpy ,
+                   entropy , 
+                   kf , 
+                   kb , 
+                   activation_energy_forward , 
+                   activation_energy_backward ,
+                   T)
+    @property
+    def T(self):
+        """
+        Get the reaction temperature.
+        
+        Returns:
+            float: Temperature in Kelvin.
+        """
+        return self._T
+    
+    @T.setter
+    def T(self , value):
+        """
+        Set the reaction temperature and automatically update rate constants and equilibrium constant.
+        
+        When the temperature is changed, the following calculations are performed:
+        - Rate constants (kf, kb) are updated using the Arrhenius equation
+        - Equilibrium constant (K) is updated using the van't Hoff equation
+        
+        The Arrhenius equation: k = k₀ * exp(-Ea/R * (1/T - 1/T₀))
+        The van't Hoff equation: K = K₀ * exp(-ΔH/R * (1/T - 1/T₀))
+        
+        Where:
+        - Ea is the activation energy (J/mol)
+        - ΔH is the enthalpy change (J/mol)
+        - R is the gas constant (8.3145 J/(mol·K))
+        - T₀ is the previous temperature
+        - T is the new temperature
+        
+        Args:
+            value (float): New temperature in Kelvin.
+            
+        Note:
+            This method requires that enthalpy and activation energies are set
+            (non-zero values) for accurate temperature-dependent calculations.
+            If these are zero, the rate constants and equilibrium constant
+            will remain unchanged.
+        """
+        new_kf = self.kf * math.exp((-self.activation_energy_forward/8.3145) * (1/value - 1/self._T))
+        new_kb = self.kb * math.exp((-self.activation_energy_backward/8.3145) * (1/value - 1/self._T))
+        self.kf = new_kf
+        self.kb = new_kb
+        new_K = self.K * math.exp((-self.enthalpy/8.3145) * (1/value - 1/self._T))
+        self.K = new_K
+        self._T = value
+    
     def __str__(self):
         """
         Return a human-readable chemical equation.
@@ -489,26 +622,36 @@ class Reaction:
         new_compounds_name = []
         new_reactants = []
         new_products = []
+        concentrations = []
         for compound in (self.compounds + other.compounds ):
             compound_name = compound["compound"].formula
             if not compound_name in new_compounds_name :
                 new_compounds_name.append(compound_name)
         for compound_name in new_compounds_name :
             stoichiometric_coefficient = 0
+            concentration = 0
             for compound in (self.compounds + other.compounds ) :
                 if compound["compound"].formula == compound_name :
+                    concentration += compound["concentration"]
                     if compound["type"] == "reactant" :
                         stoichiometric_coefficient += compound["stoichiometric_coefficient"]
+                       
                     elif compound["type"] == "product" :
                         stoichiometric_coefficient -= compound["stoichiometric_coefficient"]
+                        
             if stoichiometric_coefficient == 0:
                 continue
             elif stoichiometric_coefficient > 0 :
                 new_reactants.append(str(stoichiometric_coefficient) + "_" + compound_name)
+                concentrations.append(concentration)
             else :
                 new_products.append(str(-stoichiometric_coefficient) +  "_" + compound_name)
+                concentrations.append(concentration)
         new_reaction = ""
         counter = 0
+        enthalpy = self.enthalpy + other.enthalpy
+        entropy = self.entropy + other.entropy
+        K = (self.K * math.exp((-self.enthalpy/8.3145) * (1/298 - 1/self.T)))* (other.K * math.exp((-other.enthalpy/8.3145) * (1/298 - 1/other.T)))
         for reactant in new_reactants :
             if counter < len(new_reactants) - 1:
                 new_reaction += (reactant + " & ")
@@ -522,8 +665,14 @@ class Reaction:
                 new_reaction += (product + " & ")
             else:
                 new_reaction += (product)
-            counter += 1   
-        return Reaction.from_string_complex_syntax(new_reaction)
+            counter += 1  
+         
+        return Reaction.from_string_complex_syntax(reaction_str =new_reaction,
+                                                   concentrations = concentrations,
+                                                   enthalpy = enthalpy,
+                                                   entropy = entropy,
+                                                   K = K,
+                                                   T = 298)
 
     def __iadd__(self , other):
         """
@@ -547,6 +696,7 @@ class Reaction:
         """
         for compound in self.compounds:
             yield compound
+    
 class Enviroment():
     """
     Represents a chemical environment containing multiple reactions and compounds.
@@ -595,8 +745,9 @@ class Enviroment():
         self.reactions = []
         for reaction in reactions :
             if self._check_if_reaction(reaction):
+                reaction.T = T
                 self.reactions.append(reaction)
-        self.T = T
+        self._T = T
         self.compounds = []
         self.compounds_concentration = []
         for reaction in reactions:
@@ -610,6 +761,33 @@ class Enviroment():
                     index_in_reaction = reaction.compounds.index(compound)
                     self.compounds_concentration.append({"compound" : compound["compound"] , "concentration" :reaction.compounds[index_in_reaction]["concentration"]})
                     self.compounds.append(compound["compound"])
+    @property
+    def T(self):
+        """
+        Get the environment temperature.
+        
+        Returns:
+            float: Temperature in Kelvin.
+        """
+        return self._T
+    
+    @T.setter
+    def T(self , value):
+        """
+        Set the environment temperature and propagate to all reactions.
+        
+        When the environment temperature is changed, all reactions in the
+        environment are updated to the new temperature. Each reaction will
+        automatically recalculate its rate constants and equilibrium constant
+        based on its thermodynamic parameters (enthalpy, activation energies).
+        
+        Args:
+            value (float): New temperature in Kelvin.
+        """
+        self._T = value
+        for reaction in self.reactions:
+            reaction.T = value
+            
     def __iadd__(self , reaction):
         """
         Add a reaction to the environment using the += operator.
@@ -624,6 +802,7 @@ class Enviroment():
             ValueError: If `reaction` is not a valid Reaction object.
         """
         if self._check_if_reaction(reaction):
+            reaction.T = self.T
             self.reactions.append(reaction)
             self.compounds = []
             self.compounds_concentration = []
@@ -941,12 +1120,10 @@ class Enviroment():
             ValueError: If input is not a list or its length doesn’t match compound count.
         """
         if not(type(value) == list and len(value) == len(self.compounds_concentration)):
-            raise ValueError("The concentrations property should be a list and half the same lenght as the number of compounds")
+            raise ValueError("The concentrations property should be a list and have the same length as the number of compounds")
         for i in range(len(self.compounds_concentration)):
             self.compounds_concentration[i]["concentration"] = value[i]
             
-    def change_temperature():
-        pass
 
     def __len__(self):
         """
