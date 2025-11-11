@@ -25,13 +25,19 @@ A Python library for chemical reaction simulation, including kinetic modeling an
 - NumPy
 - Matplotlib (for plotting features)
 
-### Install Dependencies
+### Installation from PyPI (Recommended)
+
+The easiest way to install ChemCompute is using pip:
 
 ```bash
-pip install numpy matplotlib
+pip install chemcompute==0.1.0
 ```
 
+This will automatically install all required dependencies (numpy and matplotlib).
+
 ### Installation from Source
+
+If you want to install from source or contribute to the project:
 
 ```bash
 git clone <repository-url>

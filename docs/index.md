@@ -147,8 +147,24 @@ equilibrium = eq_calc.fit_calculate(env, max_iter=1000, tol=1e-8)
 
 ## Installation
 
+### From PyPI (Recommended)
+
+Install ChemCompute directly from PyPI:
+
 ```bash
-pip install numpy matplotlib
+pip install chemcompute==0.1.0
+```
+
+This will automatically install all required dependencies (numpy and matplotlib).
+
+### From Source
+
+For development or to install from source:
+
+```bash
+git clone <repository-url>
+cd ChemCompute
+pip install -e .
 ```
 
 For detailed installation instructions, see the [Installation Guide](installation.md).
