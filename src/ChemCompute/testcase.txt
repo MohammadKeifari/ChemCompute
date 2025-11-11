@@ -1,9 +1,0 @@
-reactions:
-"Fe(CN)6-3 & Ce+2 > Fe(CN)6-4 & Ce+3" , 
-"Fe(CN)6-4 & 6_H2O > Fe(H2O)6+2 & 6_CN-" 
-"A.g & 2B.s > 3c.aq & 2D-1.g"
-"A.g + B.s > C.l + D.aq "
-reactions from simple syntax:
-" A + 2BBB > 3CCC5.6 + 4D-1 "
-compounds:
-formula = "A+" , phase_point_list = [{"temperatue" : 50 , "phase" : "l"}] , mp=55
