@@ -1,6 +1,6 @@
 .venv/
-src/ChemCalc/testcase.txt
-src/ChemCalc/test.py
-src/ChemCalc/plot.png
+src/ChemCompute/testcase.txt
+src/ChemCompute/test.py
+src/ChemCompute/plot.png
 build
 dist
