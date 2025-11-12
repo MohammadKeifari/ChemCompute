@@ -18,7 +18,7 @@ if requirements_path.exists():
 
 setup(
     name="chemcompute",
-    version="0.1.0",
+    version="0.1.1",
     author="Mohammad Keifari",
     author_email="mohammadkeifari2007@gmail.com",
     description="A Python library for chemical reaction simulation, including kinetic modeling and thermodynamic equilibrium calculations",

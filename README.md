@@ -30,7 +30,7 @@ A Python library for chemical reaction simulation, including kinetic modeling an
 The easiest way to install ChemCompute is using pip:
 
 ```bash
-pip install chemcompute==0.1.0
+pip install chemcompute==0.1.1
 ```
 
 This will automatically install all required dependencies (numpy and matplotlib).
@@ -324,6 +324,7 @@ results = kc.calculate(
 ```
 
 The `colors` parameter accepts:
+
 - Color name strings (e.g., `'red'`, `'blue'`, `'green'`)
 - Hex color strings (e.g., `'#26547c'`, `'#ef476f'`)
 - RGB tuples (e.g., `(0.2, 0.3, 0.5)`)
@@ -745,6 +746,7 @@ results = kc.calculate(
 **Custom Colors:**
 
 The `colors` parameter allows you to specify colors for each compound:
+
 - Accepts color names: `['red', 'blue', 'green']`
 - Hex color codes: `['#26547c', '#ef476f', '#ffd166']`
 - RGB tuples: `[(1, 0, 0), (0, 0, 1), (0, 1, 0)]`
