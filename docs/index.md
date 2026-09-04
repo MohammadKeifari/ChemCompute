@@ -27,9 +27,9 @@ ChemCompute provides a powerful and flexible framework for:
 
 - [Compound Class](compound.md) - Working with chemical compounds
 - [Reaction Class](reaction.md) - Defining and managing chemical reactions
-- [Enviroment Class](environment.md) - Managing reaction systems
-- [KineticalCalculator](kinetic.md) - Simulating reaction kinetics
-- [EquilibriumCalculator](equilibrium.md) - Calculating equilibrium states
+- [Enviroment Class](environment.md) - Managing reaction systems (includes `equilibrium()` and `kinetics()`)
+- [KineticalCalculator](kinetic.md) - Deprecated kinetic wrapper
+- [EquilibriumCalculator](equilibrium.md) - Deprecated equilibrium wrapper
 
 ### Advanced Topics
 
@@ -127,22 +127,21 @@ rxn.T = 350  # Uses Arrhenius and van't Hoff equations
 Simulate reaction kinetics over time:
 
 ```python
-from ChemCompute.Kinetic import KineticalCalculator
-
-kc = KineticalCalculator(accuracy=1e-3)
-kc.fit(env)
-results = kc.calculate(time=10.0, plot="interactive")
+results = env.kinetics(time=10.0, accuracy=1e-3, plot="interactive")
 ```
 
 ### ⚖️ Equilibrium Calculations
 
-Calculate equilibrium concentrations using multiple algorithms:
+Calculate equilibrium concentrations using multiple algorithms and loss functions:
 
 ```python
-from ChemCompute.Thermodynamic import EquilibriumCalculator
-
-eq_calc = EquilibriumCalculator(method_of_calculation="newton")
-equilibrium = eq_calc.fit_calculate(env, max_iter=1000, tol=1e-8)
+equilibrium = env.equilibrium(
+    method="newton",
+    loss="log_quotient",
+    max_iter=1000,
+    tol=1e-8,
+    concentration_error_limit=0.01,
+)
 ```
 
 ## Installation
@@ -175,8 +174,6 @@ Here's a complete example to get you started:
 
 ```python
 from ChemCompute import Compound, Reaction, Enviroment
-from ChemCompute.Kinetic import KineticalCalculator
-from ChemCompute.Thermodynamic import EquilibriumCalculator
 
 # Create a simple reversible reaction: A ⇌ B
 rxn = Reaction.from_string_simple_syntax(
@@ -191,13 +188,10 @@ rxn = Reaction.from_string_simple_syntax(
 env = Enviroment(rxn, T=298)
 
 # Kinetic simulation
-kc = KineticalCalculator(accuracy=0.01)
-kc.fit(env)
-kinetic_results = kc.calculate(time=10.0, plot=False)
+kinetic_results = env.kinetics(time=10.0, accuracy=0.01, plot=False)
 
 # Equilibrium calculation
-eq_calc = EquilibriumCalculator(method_of_calculation="bgd")
-equilibrium = eq_calc.fit_calculate(env, max_iter=1000, tol=1e-8)
+equilibrium = env.equilibrium(method="bgd", max_iter=1000, tol=1e-8)
 
 print(f"Equilibrium concentrations: {equilibrium}")
 ```

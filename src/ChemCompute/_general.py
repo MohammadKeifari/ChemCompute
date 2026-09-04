@@ -1123,7 +1123,112 @@ class Enviroment():
             raise ValueError("The concentrations property should be a list and have the same length as the number of compounds")
         for i in range(len(self.compounds_concentration)):
             self.compounds_concentration[i]["concentration"] = value[i]
-            
+
+    def equilibrium(
+        self,
+        *,
+        method: str = "bgd",
+        loss: str = "log_quotient",
+        max_iter=None,
+        learning_rate=None,
+        tol=None,
+        backtrack_beta: float = 0.5,
+        min_concentration: float = 1e-12,
+        concentration_error_limit=None,
+        huber_delta: float = 1.0,
+    ):
+        """
+        Calculate equilibrium concentrations for this environment.
+
+        Parameters
+        ----------
+        method : str, optional
+            Optimization method: ``"bgd"``, ``"sgd"``, or ``"newton"``. Default ``"bgd"``.
+        loss : str, optional
+            Loss function: ``"log_quotient"``, ``"quotient_error"``, or ``"log_huber"``.
+            Default ``"log_quotient"``.
+        max_iter : int, optional
+            Maximum iterations. Defaults depend on ``method``.
+        learning_rate : float, optional
+            Step size. Defaults depend on ``method``.
+        tol : float, optional
+            Residual convergence tolerance. Defaults depend on ``method``.
+        backtrack_beta : float, optional
+            Backtracking line search factor. Default ``0.5``.
+        min_concentration : float, optional
+            Floor for log computations. Default ``1e-12``.
+        concentration_error_limit : float, optional
+            Stop when max relative concentration change between iterates is below this value.
+        huber_delta : float, optional
+            Delta parameter for the ``"log_huber"`` loss. Default ``1.0``.
+
+        Returns
+        -------
+        list[float]
+            Equilibrium concentrations aligned with ``self.compounds``.
+        """
+        from ._equilibrium import solve_equilibrium
+
+        return solve_equilibrium(
+            self,
+            method=method,
+            loss=loss,
+            max_iter=max_iter,
+            learning_rate=learning_rate,
+            tol=tol,
+            backtrack_beta=backtrack_beta,
+            min_concentration=min_concentration,
+            concentration_error_limit=concentration_error_limit,
+            huber_delta=huber_delta,
+        )
+
+    def kinetics(
+        self,
+        time,
+        checkpoint_time=None,
+        plot=False,
+        directory="./plot.png",
+        colors=None,
+        *,
+        accuracy: float = 1e-3,
+    ):
+        """
+        Integrate reaction kinetics over time for this environment.
+
+        Parameters
+        ----------
+        time : float
+            Total simulation time.
+        checkpoint_time : list[float], optional
+            Times at which to record concentrations.
+        plot : bool or str, optional
+            Plotting mode: ``False``, ``"interactive"``, or ``"save"``.
+        directory : str, optional
+            File path when ``plot="save"``.
+        colors : list, optional
+            Plot colors, one per compound.
+        accuracy : float, optional
+            Integration time step. Default ``1e-3``.
+
+        Returns
+        -------
+        list
+            Checkpoint concentration snapshots.
+        """
+        from ._kinetics import integrate_kinetics
+
+        if checkpoint_time is None:
+            checkpoint_time = []
+
+        return integrate_kinetics(
+            self,
+            time=time,
+            accuracy=accuracy,
+            checkpoint_time=checkpoint_time,
+            plot=plot,
+            directory=directory,
+            colors=colors,
+        )
 
     def __len__(self):
         """

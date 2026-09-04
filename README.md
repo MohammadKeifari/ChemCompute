@@ -49,11 +49,9 @@ pip install -e .
 
 ```python
 from ChemCompute import Compound, Reaction, Enviroment
-from ChemCompute.Kinetic import KineticalCalculator
-from ChemCompute.Thermodynamic import EquilibriumCalculator
 ```
 
-The package must be installed (using `pip install -e .`) for these imports to work. Without installation, you would need to use `from src.ChemCompute import ...` instead.
+The package must be installed (using `pip install -e .`) for these imports to work. Legacy calculator classes remain available from `ChemCompute.Kinetic` and `ChemCompute.Thermodynamic` but are deprecated.
 
 ## Quick Start
 
@@ -61,8 +59,6 @@ The package must be installed (using `pip install -e .`) for these imports to wo
 
 ```python
 from ChemCompute import Compound, Reaction, Enviroment
-from ChemCompute.Kinetic import KineticalCalculator
-from ChemCompute.Thermodynamic import EquilibriumCalculator
 
 # Create compounds
 A = Compound("A")
@@ -81,14 +77,16 @@ rxn = Reaction.from_string_simple_syntax(
 env = Enviroment(rxn, T=298)  # Temperature in Kelvin
 
 # Kinetic simulation
-kc = KineticalCalculator(accuracy=1e-3)
-kc.fit(env)
-results = kc.calculate(time=10.0, plot=False)
+results = env.kinetics(time=10.0, accuracy=1e-3, plot=False)
 
 # Equilibrium calculation
-eq_calc = EquilibriumCalculator(method_of_calculation="bgd")
-eq_calc.fit(env)
-equilibrium = eq_calc.calculate(max_iter=1000, tol=1e-8)
+equilibrium = env.equilibrium(
+    method="bgd",
+    loss="log_quotient",
+    max_iter=1000,
+    tol=1e-8,
+    concentration_error_limit=0.01,  # optional: stop when iterates stabilize
+)
 ```
 
 ## Core Components
@@ -278,26 +276,17 @@ env.T = 350  # All reactions update their K, kf, kb values
 - `stoichiometric_coefficient_array`: Stoichiometric matrix
 - `rate_constants_array`: Rate constants matrix
 
-### KineticalCalculator
+### Enviroment.kinetics()
 
-Simulates chemical reaction kinetics over time.
+Simulates chemical reaction kinetics over time. This is the recommended API.
 
 ```python
-# Initialize with accuracy (time step)
-kc = KineticalCalculator(accuracy=1e-3)
-
-# Fit to environment
-kc.fit(env)
-
-# Calculate concentrations over time
-results = kc.calculate(
-    time=10.0,  # Total simulation time
-    checkpoint_time=[1.0, 5.0, 10.0],  # Optional: specific time points
-    plot=False  # or "interactive" or "save"
+results = env.kinetics(
+    time=10.0,
+    accuracy=1e-3,
+    checkpoint_time=[1.0, 5.0, 10.0],
+    plot=False,  # or "interactive" or "save"
 )
-
-# Or fit and calculate in one step
-results = kc.fit_calculate(env, time=10.0, plot="interactive")
 ```
 
 **Plotting Options:**
@@ -308,19 +297,27 @@ results = kc.fit_calculate(env, time=10.0, plot="interactive")
 
 **Custom Colors:**
 
-You can specify custom colors for each compound in the plot:
-
 ```python
-# Define custom colors (one per compound)
-colors = ['#26547c', '#ef476f', '#ffd166', '#06d6a0']  # Hex colors
-# Or use color names: ['red', 'blue', 'green']
-# Or RGB tuples: [(0.2, 0.3, 0.5), (0.9, 0.3, 0.4)]
+colors = ['#26547c', '#ef476f', '#ffd166', '#06d6a0']
 
-results = kc.calculate(
+results = env.kinetics(
     time=10.0,
     plot="save",
-    colors=colors  # Custom colors for each compound
+    colors=colors,
+    directory="./plot.png",
 )
+```
+
+### KineticalCalculator (Deprecated)
+
+Legacy wrapper around `env.kinetics()`. Prefer `env.kinetics()` directly.
+
+```python
+from ChemCompute.Kinetic import KineticalCalculator
+
+kc = KineticalCalculator(accuracy=1e-3)
+kc.fit(env)
+results = kc.calculate(time=10.0, plot="interactive")
 ```
 
 The `colors` parameter accepts:
@@ -331,31 +328,20 @@ The `colors` parameter accepts:
 - Must have length equal to the number of compounds
 - If `None` (default), random colors are generated
 
-### EquilibriumCalculator
+### Enviroment.equilibrium()
 
-Calculates equilibrium concentrations using numerical optimization.
+Calculates equilibrium concentrations using numerical optimization. This is the recommended API.
 
 ```python
-# Initialize with method
-eq_calc = EquilibriumCalculator(method_of_calculation="bgd")  # or "sgd" or "newton"
-
-# Fit to environment
-eq_calc.fit(env)
-
-# Calculate equilibrium
-equilibrium = eq_calc.calculate(
+equilibrium = env.equilibrium(
+    method="bgd",              # "bgd", "sgd", or "newton"
+    loss="log_quotient",       # "log_quotient", "quotient_error", or "log_huber"
     max_iter=5000,
     learning_rate=0.1,
     tol=1e-8,
     backtrack_beta=0.5,
-    min_concentration=1e-12
-)
-
-# Or fit and calculate in one step
-equilibrium = eq_calc.fit_calculate(
-    env,
-    max_iter=1000,
-    tol=1e-8
+    min_concentration=1e-12,
+    concentration_error_limit=0.01,  # optional stopping criterion
 )
 ```
 
@@ -365,13 +351,32 @@ equilibrium = eq_calc.fit_calculate(
 - `"sgd"`: Stochastic Gradient Descent - processes reactions in random order
 - `"newton"`: Newton's Method - uses second-order information for faster convergence
 
+**Loss Functions:**
+
+- `"log_quotient"`: Minimize `ln(Q/K)` (default)
+- `"quotient_error"`: Minimize `Q/K - 1`
+- `"log_huber"`: Huber-smoothed `ln(Q/K)` for robust convergence
+
 **Parameters:**
 
-- `max_iter`: Maximum iterations (default: 5000)
-- `learning_rate`: Step size for gradient updates (default: 0.1)
-- `tol`: Convergence tolerance (default: 1e-8)
+- `max_iter`: Maximum iterations (default depends on method)
+- `learning_rate`: Step size for gradient updates (default depends on method)
+- `tol`: Convergence tolerance (default depends on method)
 - `backtrack_beta`: Backtracking line search parameter (default: 0.5)
 - `min_concentration`: Minimum concentration threshold (default: 1e-12)
+- `concentration_error_limit`: Stop when max relative concentration change between iterates is below this value
+
+### EquilibriumCalculator (Deprecated)
+
+Legacy wrapper around `env.equilibrium()`. Prefer `env.equilibrium()` directly.
+
+```python
+from ChemCompute.Thermodynamic import EquilibriumCalculator
+
+eq_calc = EquilibriumCalculator(method_of_calculation="bgd")
+eq_calc.fit(env)
+equilibrium = eq_calc.calculate(max_iter=1000, tol=1e-8)
+```
 
 ## Examples
 
@@ -519,8 +524,10 @@ ChemCompute/
 │   └── ChemCompute/                 # Main package
 │       ├── __init__.py           # Package initialization (exports core classes)
 │       ├── _general.py           # Core classes: Compound, Reaction, Enviroment
-│       ├── Kinetic.py            # KineticalCalculator class for kinetic simulations
-│       └── Thermodynamic.py      # EquilibriumCalculator class for equilibrium calculations
+│       ├── _equilibrium.py       # Unified equilibrium solver and loss registry
+│       ├── _kinetics.py          # Kinetic integration logic
+│       ├── Kinetic.py            # KineticalCalculator (deprecated wrapper)
+│       └── Thermodynamic.py      # EquilibriumCalculator (deprecated wrapper)
 │
 ├── tests/                        # Test suite
 │   ├── __init__.py               # Test package initialization
