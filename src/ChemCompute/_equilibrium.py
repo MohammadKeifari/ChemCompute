@@ -10,8 +10,6 @@ METHOD_DEFAULTS = {
 }
 
 VALID_METHODS = tuple(METHOD_DEFAULTS.keys())
-EXTENT_FLOOR = 1e-12
-JACOBIAN_DIAG_FLOOR = 1e-30
 
 
 def _huber_value(x: np.ndarray, delta: float) -> np.ndarray:
@@ -67,8 +65,8 @@ class EquilibriumResult:
     concentrations: list[float]
     compounds: list[str]
     reaction_extents: list[float]
-    reaction_extent_percent: list[float]
-    max_reaction_extent_percent: float
+    reaction_quotient_error: list[float]
+    max_reaction_quotient_error: float
     reaction_quotient_ratio: list[float]
     converged: bool
     stop_reason: str
@@ -82,6 +80,11 @@ class EquilibriumResult:
     def q_over_k(self) -> list[float]:
         """Per-reaction Q/K ratio at the solution (1.0 means equilibrium)."""
         return self.reaction_quotient_ratio
+
+    @property
+    def concentrations_dict(self) -> dict[str, float]:
+        """Map compound formula labels to equilibrium concentrations."""
+        return dict(zip(self.compounds, self.concentrations))
 
 
 @dataclass
@@ -125,103 +128,24 @@ def _compute_jacobian(ctx: EquilibriumContext, c_safe: np.ndarray, jacobian_scal
     return jacobian_scale[:, None] * J
 
 
-def _residual_i_at_delta(
-    ctx: EquilibriumContext,
-    x: np.ndarray,
-    reaction_index: int,
-    delta: float,
-    loss_fn: EquilibriumLoss,
-) -> float:
-    x_try = x.copy()
-    x_try[reaction_index] += delta
-    c = ctx.c0 + ctx.S @ x_try
-    c_safe = np.maximum(c, ctx.min_concentration)
+def _reaction_quotient_errors(ctx: EquilibriumContext, x: np.ndarray) -> np.ndarray:
+    c_safe = np.maximum(ctx.c0 + ctx.S @ x, ctx.min_concentration)
     lnQ = _compute_lnQ(ctx, c_safe)
-    residual = loss_fn.residual(lnQ, ctx.lnK)
-    return float(residual[reaction_index])
+    q_over_k = np.exp(lnQ - ctx.lnK)
+    return np.abs(q_over_k - 1.0)
 
 
-def _bisection_delta(
-    ctx: EquilibriumContext,
-    x: np.ndarray,
-    reaction_index: int,
-    loss_fn: EquilibriumLoss,
-    tol: float,
-) -> float:
-    f0 = _residual_i_at_delta(ctx, x, reaction_index, 0.0, loss_fn)
-    if abs(f0) < tol:
-        return 0.0
-
-    low, high = -1.0, 1.0
-    f_low = _residual_i_at_delta(ctx, x, reaction_index, low, loss_fn)
-    f_high = _residual_i_at_delta(ctx, x, reaction_index, high, loss_fn)
-
-    expand = 1.0
-    while f_low * f_high > 0 and expand < 1e6:
-        expand *= 2.0
-        low = -expand
-        high = expand
-        f_low = _residual_i_at_delta(ctx, x, reaction_index, low, loss_fn)
-        f_high = _residual_i_at_delta(ctx, x, reaction_index, high, loss_fn)
-
-    if f_low * f_high > 0:
-        return 0.0
-
-    for _ in range(80):
-        mid = 0.5 * (low + high)
-        f_mid = _residual_i_at_delta(ctx, x, reaction_index, mid, loss_fn)
-        if abs(f_mid) < tol or (high - low) < 1e-14:
-            return mid
-        if f_low * f_mid <= 0:
-            high = mid
-            f_high = f_mid
-        else:
-            low = mid
-            f_low = f_mid
-    return 0.5 * (low + high)
+def _use_residual_tolerance(quotient_error_limit: Optional[float]) -> bool:
+    return quotient_error_limit is None
 
 
-def _reaction_extent_gaps(
-    ctx: EquilibriumContext,
-    x: np.ndarray,
-    loss_fn: EquilibriumLoss,
-    tol: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    c = ctx.c0 + ctx.S @ x
-    c_safe = np.maximum(c, ctx.min_concentration)
-    lnQ = _compute_lnQ(ctx, c_safe)
-    residual = loss_fn.residual(lnQ, ctx.lnK)
-    scale = loss_fn.jacobian_scale(residual)
-    J = _compute_jacobian(ctx, c_safe, scale)
-
-    delta_x = np.zeros(ctx.R, dtype=float)
-    for i in range(ctx.R):
-        r_i = residual[i]
-        if abs(r_i) < tol:
-            continue
-
-        j_ii = J[i, i]
-        if abs(j_ii) > JACOBIAN_DIAG_FLOOR:
-            delta_x[i] = -r_i / j_ii
-        else:
-            delta_x[i] = _bisection_delta(ctx, x, i, loss_fn, tol)
-
-    denom = np.maximum(np.abs(x), EXTENT_FLOOR)
-    percent = np.abs(delta_x) / denom
-    return delta_x, percent
-
-
-def _use_residual_tolerance(reaction_extent_error_limit: Optional[float]) -> bool:
-    return reaction_extent_error_limit is None
-
-
-def _reaction_extent_converged(
-    percent: np.ndarray,
-    reaction_extent_error_limit: Optional[float],
+def _quotient_error_converged(
+    errors: np.ndarray,
+    quotient_error_limit: Optional[float],
 ) -> bool:
-    if reaction_extent_error_limit is None:
+    if quotient_error_limit is None:
         return False
-    return float(np.max(percent)) <= reaction_extent_error_limit
+    return float(np.max(errors)) <= quotient_error_limit
 
 
 def _finalize(ctx: EquilibriumContext, x: np.ndarray):
@@ -239,10 +163,10 @@ def _build_result(
     tol: float,
     stop_reason: str,
     iterations: int,
-    reaction_extent_error_limit: Optional[float],
+    quotient_error_limit: Optional[float],
 ) -> EquilibriumResult:
-    _, percent = _reaction_extent_gaps(ctx, x, loss_fn, tol)
-    max_percent = float(np.max(percent)) if percent.size else 0.0
+    errors = _reaction_quotient_errors(ctx, x)
+    max_error = float(np.max(errors)) if errors.size else 0.0
 
     c = ctx.c0 + ctx.S @ x
     c_safe = np.maximum(c, ctx.min_concentration)
@@ -251,18 +175,18 @@ def _build_result(
     residual_norm = float(np.linalg.norm(residual, ord=2))
     q_over_k = np.exp(lnQ - ctx.lnK)
 
-    if reaction_extent_error_limit is not None:
-        criterion_type = "reaction_extent"
-        criterion_value = max_percent
-        criterion_limit = float(reaction_extent_error_limit)
-        criterion_met = max_percent <= reaction_extent_error_limit
+    if quotient_error_limit is not None:
+        criterion_type = "quotient_error"
+        criterion_value = max_error
+        criterion_limit = float(quotient_error_limit)
+        criterion_met = max_error <= quotient_error_limit
     else:
         criterion_type = "residual_tol"
         criterion_value = residual_norm
         criterion_limit = float(tol)
         criterion_met = residual_norm < tol
 
-    if stop_reason == "reaction_extent_limit":
+    if stop_reason == "quotient_error_limit":
         converged = True
     elif stop_reason == "residual_tol":
         converged = True
@@ -273,8 +197,8 @@ def _build_result(
         concentrations=concentrations,
         compounds=[compound.formula for compound in env.compounds],
         reaction_extents=x.tolist(),
-        reaction_extent_percent=percent.tolist(),
-        max_reaction_extent_percent=max_percent,
+        reaction_quotient_error=errors.tolist(),
+        max_reaction_quotient_error=max_error,
         reaction_quotient_ratio=q_over_k.tolist(),
         converged=converged,
         stop_reason=stop_reason,
@@ -293,7 +217,7 @@ def _run_bgd(
     learning_rate: float,
     tol: float,
     backtrack_beta: float,
-    reaction_extent_error_limit: Optional[float],
+    quotient_error_limit: Optional[float],
 ):
     x = np.zeros(ctx.R, dtype=float)
     stop_reason = "max_iter"
@@ -305,12 +229,12 @@ def _run_bgd(
         lnQ = _compute_lnQ(ctx, c_safe)
         residual = loss_fn.residual(lnQ, ctx.lnK)
 
-        _, percent = _reaction_extent_gaps(ctx, x, loss_fn, tol)
-        if _reaction_extent_converged(percent, reaction_extent_error_limit):
-            stop_reason = "reaction_extent_limit"
+        errors = _reaction_quotient_errors(ctx, x)
+        if _quotient_error_converged(errors, quotient_error_limit):
+            stop_reason = "quotient_error_limit"
             break
 
-        if _use_residual_tolerance(reaction_extent_error_limit) and np.linalg.norm(residual, ord=2) < tol:
+        if _use_residual_tolerance(quotient_error_limit) and np.linalg.norm(residual, ord=2) < tol:
             stop_reason = "residual_tol"
             break
 
@@ -318,7 +242,7 @@ def _run_bgd(
         J = _compute_jacobian(ctx, c_safe, scale)
         grad = J.T @ loss_fn.grad_weights(residual)
 
-        if _use_residual_tolerance(reaction_extent_error_limit) and np.linalg.norm(grad, ord=2) < tol:
+        if _use_residual_tolerance(quotient_error_limit) and np.linalg.norm(grad, ord=2) < tol:
             stop_reason = "residual_tol"
             break
 
@@ -350,7 +274,7 @@ def _run_sgd(
     learning_rate: float,
     tol: float,
     backtrack_beta: float,
-    reaction_extent_error_limit: Optional[float],
+    quotient_error_limit: Optional[float],
 ):
     x = np.zeros(ctx.R, dtype=float)
     stop_reason = "max_iter"
@@ -366,7 +290,7 @@ def _run_sgd(
 
             lnQ_i = ctx.A[i, :] @ np.log(c_safe)
             r_i = loss_fn.residual(np.array([lnQ_i]), np.array([ctx.lnK[i]]))[0]
-            if _use_residual_tolerance(reaction_extent_error_limit) and abs(r_i) < tol:
+            if _use_residual_tolerance(quotient_error_limit) and abs(r_i) < tol:
                 continue
 
             scale_i = loss_fn.jacobian_scale(np.array([r_i]))[0]
@@ -390,9 +314,9 @@ def _run_sgd(
                         break
                 step *= backtrack_beta
 
-        _, percent = _reaction_extent_gaps(ctx, x, loss_fn, tol)
-        if _reaction_extent_converged(percent, reaction_extent_error_limit):
-            stop_reason = "reaction_extent_limit"
+        errors = _reaction_quotient_errors(ctx, x)
+        if _quotient_error_converged(errors, quotient_error_limit):
+            stop_reason = "quotient_error_limit"
             break
 
         c_full = ctx.c0 + ctx.S @ x
@@ -400,7 +324,7 @@ def _run_sgd(
         full_lnQ = _compute_lnQ(ctx, c_full_safe)
         full_residual = loss_fn.residual(full_lnQ, ctx.lnK)
 
-        if _use_residual_tolerance(reaction_extent_error_limit) and np.linalg.norm(full_residual, ord=2) < tol:
+        if _use_residual_tolerance(quotient_error_limit) and np.linalg.norm(full_residual, ord=2) < tol:
             stop_reason = "residual_tol"
             break
         if not any_update:
@@ -419,7 +343,7 @@ def _run_newton(
     learning_rate: float,
     tol: float,
     backtrack_beta: float,
-    reaction_extent_error_limit: Optional[float],
+    quotient_error_limit: Optional[float],
 ):
     x = np.zeros(ctx.R, dtype=float)
     stop_reason = "max_iter"
@@ -431,12 +355,12 @@ def _run_newton(
         lnQ = _compute_lnQ(ctx, c_safe)
         residual = loss_fn.residual(lnQ, ctx.lnK)
 
-        _, percent = _reaction_extent_gaps(ctx, x, loss_fn, tol)
-        if _reaction_extent_converged(percent, reaction_extent_error_limit):
-            stop_reason = "reaction_extent_limit"
+        errors = _reaction_quotient_errors(ctx, x)
+        if _quotient_error_converged(errors, quotient_error_limit):
+            stop_reason = "quotient_error_limit"
             break
 
-        if _use_residual_tolerance(reaction_extent_error_limit) and np.linalg.norm(residual, ord=2) < tol:
+        if _use_residual_tolerance(quotient_error_limit) and np.linalg.norm(residual, ord=2) < tol:
             stop_reason = "residual_tol"
             break
 
@@ -479,7 +403,7 @@ def solve_equilibrium(
     tol: Optional[float] = None,
     backtrack_beta: float = 0.5,
     min_concentration: float = 1e-12,
-    reaction_extent_error_limit: Optional[float] = None,
+    quotient_error_limit: Optional[float] = None,
     huber_delta: float = 1.0,
     return_details: bool = False,
 ) -> Union[list[float], EquilibriumResult]:
@@ -501,7 +425,7 @@ def solve_equilibrium(
         "learning_rate": learning_rate,
         "tol": tol,
         "backtrack_beta": backtrack_beta,
-        "reaction_extent_error_limit": reaction_extent_error_limit,
+        "quotient_error_limit": quotient_error_limit,
     }
 
     if method == "bgd":
@@ -522,7 +446,7 @@ def solve_equilibrium(
         tol,
         stop_reason,
         iterations,
-        reaction_extent_error_limit,
+        quotient_error_limit,
     )
 
     if return_details:

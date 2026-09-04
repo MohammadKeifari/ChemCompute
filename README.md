@@ -85,7 +85,7 @@ equilibrium = env.equilibrium(
     loss="log_quotient",
     max_iter=1000,
     tol=1e-8,
-    reaction_extent_error_limit=0.01,
+    quotient_error_limit=0.01,
 )
 ```
 
@@ -329,7 +329,7 @@ equilibrium = env.equilibrium(
     tol=1e-8,
     backtrack_beta=0.5,
     min_concentration=1e-12,
-    reaction_extent_error_limit=0.01,
+    quotient_error_limit=0.01,
 )
 ```
 
@@ -352,20 +352,22 @@ equilibrium = env.equilibrium(
 - `tol`: Convergence tolerance (default depends on method)
 - `backtrack_beta`: Backtracking line search parameter (default: 0.5)
 - `min_concentration`: Minimum concentration threshold (default: 1e-12)
-- `reaction_extent_error_limit`: Stop when every reaction's isolated extent gap satisfies `|Δx_i|/|x_i| <= limit`. When set, `tol` is ignored.
-- `return_details`: If `True`, return an `EquilibriumResult` with compounds, reaction extents, per-reaction extent %, Q/K ratios, `stop_reason`, and `iterations`. The full result is always available via `env.last_equilibrium_result`.
+- `quotient_error_limit`: Stop when every reaction satisfies `|Q/K - 1| <= limit`. When set, `tol` is ignored. For example, `0.01` means within 1% of K per reaction.
+- `return_details`: If `True`, return an `EquilibriumResult` with compounds, reaction extents, per-reaction |Q/K - 1| errors, Q/K ratios, `stop_reason`, and `iterations`. The full result is always available via `env.last_equilibrium_result`.
 
 Use `env.apply_equilibrium(...)` to calculate equilibrium and write concentrations back to the environment in one step.
 
 Use `env.compound_labels` anytime to get ordered compound formula strings aligned with concentrations.
+Use ``env.concentrations_dict`` or ``result.concentrations_dict`` for a ``{formula: concentration}`` mapping.
 
 ```python
 result = env.equilibrium(method="newton", return_details=True)
+print(result.concentrations_dict)         # {"A": 0.33, "B": 0.67}
 print(result.compounds)                   # ["A", "B"]
-print(result.reaction_extent_percent)     # per-reaction |Δx_i|/|x_i|
-print(result.max_reaction_extent_percent)
+print(result.reaction_quotient_error)     # per-reaction |Q/K - 1|
+print(result.max_reaction_quotient_error)
 print(result.criterion_met)                 # True if active criterion satisfied
-print(result.criterion_type)                # "reaction_extent" or "residual_tol"
+print(result.criterion_type)                # "quotient_error" or "residual_tol"
 print(result.criterion_value)               # measured value at final solution
 print(result.criterion_limit)               # threshold that was checked
 
@@ -764,7 +766,7 @@ Use `env.equilibrium()` to solve for equilibrium concentrations:
 **Advanced Features:**
 
 - Pluggable loss functions (`log_quotient`, `quotient_error`, `log_huber`)
-- Optional `reaction_extent_error_limit` stopping criterion (ignores `tol` when set)
+- Optional `quotient_error_limit` stopping criterion (ignores `tol` when set)
 - Backtracking line search to ensure non-negative concentrations
 - Automatic phase exclusion (solids/liquids excluded from equilibrium)
 
@@ -776,7 +778,7 @@ equilibrium = env.equilibrium(
     loss="log_quotient",
     max_iter=1000,
     tol=1e-8,
-    reaction_extent_error_limit=0.01,
+    quotient_error_limit=0.01,
     return_details=True,
 )
 ```

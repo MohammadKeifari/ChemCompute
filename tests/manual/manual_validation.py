@@ -164,7 +164,7 @@ env8 = Enviroment(
     T=298,
 )
 
-# env9: reaction_extent_error_limit stopping criterion
+# env9: quotient_error_limit stopping criterion
 env9 = Enviroment(
     Reaction.from_string_simple_syntax(
         "A > B",
@@ -271,14 +271,14 @@ MANUAL_CASES: list[ManualCase] = [
     ),
     ManualCase(
         name="env9",
-        description="reaction_extent_error_limit stopping (1%)",
+        description="quotient_error_limit stopping (1%)",
         env=env9,
         expected_equilibrium=[1.0 / 3.0, 2.0 / 3.0],
         acceptable_rel_error=0.02,
         equilibrium_kwargs={
             "method": "bgd",
             "loss": "log_quotient",
-            "reaction_extent_error_limit": 0.01,
+            "quotient_error_limit": 0.01,
             "max_iter": 5000,
         },
         kinetic_kwargs={"time": 8.0, "accuracy": 0.02},
@@ -332,8 +332,8 @@ def _print_equilibrium_report(case: ManualCase, result: EquilibriumResult) -> bo
     print(f"Computed equilibrium:   {[round(v, 6) for v in computed]}")
     print(f"Relative errors:        {[round(e, 6) for e in errors]}")
     print(f"Reaction extents:       {[round(v, 6) for v in result.reaction_extents]}")
-    print(f"Reaction extent %:      {[round(v, 6) for v in result.reaction_extent_percent]}")
-    print(f"Max reaction extent %:  {result.max_reaction_extent_percent:.6f}")
+    print(f"Reaction quotient err:  {[round(v, 6) for v in result.reaction_quotient_error]}")
+    print(f"Max quotient error:     {result.max_reaction_quotient_error:.6f}")
     print(f"Q/K ratios:             {[round(v, 6) for v in result.reaction_quotient_ratio]}")
     print(f"Criterion ({result.criterion_type}): {result.criterion_value:.6g} / {result.criterion_limit:.6g} -> {'MET' if result.criterion_met else 'NOT MET'}")
     print(f"Stop reason:            {result.stop_reason} ({result.iterations} iterations)")

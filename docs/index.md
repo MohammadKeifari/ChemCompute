@@ -136,7 +136,7 @@ result = env.equilibrium(
     loss="log_quotient",
     max_iter=1000,
     tol=1e-8,
-    reaction_extent_error_limit=0.01,
+    quotient_error_limit=0.01,
     return_details=True,
 )
 

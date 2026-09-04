@@ -1136,6 +1136,18 @@ class Enviroment():
         """
         return [compound.formula for compound in self.compounds]
 
+    @property
+    def concentrations_dict(self) -> dict[str, float]:
+        """
+        Map compound formula labels to current concentrations.
+
+        Returns
+        -------
+        dict[str, float]
+            ``{formula: concentration}`` for every compound in the environment.
+        """
+        return dict(zip(self.compound_labels, self.concentrations))
+
     def equilibrium(
         self,
         *,
@@ -1146,7 +1158,7 @@ class Enviroment():
         tol=None,
         backtrack_beta: float = 0.5,
         min_concentration: float = 1e-12,
-        reaction_extent_error_limit=None,
+        quotient_error_limit=None,
         huber_delta: float = 1.0,
         return_details: bool = False,
     ):
@@ -1166,14 +1178,14 @@ class Enviroment():
             Step size. Defaults depend on ``method``.
         tol : float, optional
             Residual convergence tolerance. Defaults depend on ``method``.
-            Ignored when ``reaction_extent_error_limit`` is set.
+            Ignored when ``quotient_error_limit`` is set.
         backtrack_beta : float, optional
             Backtracking line search factor. Default ``0.5``.
         min_concentration : float, optional
             Floor for log computations. Default ``1e-12``.
-        reaction_extent_error_limit : float, optional
-            Stop when every reaction's isolated extent gap satisfies
-            ``|Δx_i| / |x_i| <= limit``. When set, ``tol`` is ignored.
+        quotient_error_limit : float, optional
+            Stop when every reaction satisfies ``|Q/K - 1| <= limit``.
+            When set, ``tol`` is ignored. For example, ``0.01`` means within 1% of K.
         huber_delta : float, optional
             Delta parameter for the ``"log_huber"`` loss. Default ``1.0``.
         return_details : bool, optional
@@ -1181,7 +1193,7 @@ class Enviroment():
             diagnostics. Default ``False``. Regardless of this flag, the full
             result is stored on ``last_equilibrium_result``. The result includes
             ``criterion_met``, which checks the final solution against
-            ``reaction_extent_error_limit`` (if set) or ``tol`` (otherwise).
+            ``quotient_error_limit`` (if set) or ``tol`` (otherwise).
 
         Returns
         -------
@@ -1200,7 +1212,7 @@ class Enviroment():
             tol=tol,
             backtrack_beta=backtrack_beta,
             min_concentration=min_concentration,
-            reaction_extent_error_limit=reaction_extent_error_limit,
+            quotient_error_limit=quotient_error_limit,
             huber_delta=huber_delta,
             return_details=True,
         )
@@ -1232,7 +1244,7 @@ class Enviroment():
         tol=None,
         backtrack_beta: float = 0.5,
         min_concentration: float = 1e-12,
-        reaction_extent_error_limit=None,
+        quotient_error_limit=None,
         huber_delta: float = 1.0,
     ):
         """
@@ -1241,7 +1253,7 @@ class Enviroment():
         Parameters
         ----------
         method, loss, max_iter, learning_rate, tol, backtrack_beta,
-        min_concentration, reaction_extent_error_limit, huber_delta
+        min_concentration, quotient_error_limit, huber_delta
             Same as :meth:`equilibrium`.
 
         Returns
@@ -1258,7 +1270,7 @@ class Enviroment():
             tol=tol,
             backtrack_beta=backtrack_beta,
             min_concentration=min_concentration,
-            reaction_extent_error_limit=reaction_extent_error_limit,
+            quotient_error_limit=quotient_error_limit,
             huber_delta=huber_delta,
             return_details=True,
         )
