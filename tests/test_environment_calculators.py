@@ -116,6 +116,38 @@ def test_reaction_extent_error_limit_ignores_tol(simple_equilibrium_environment)
     assert loose_tol_result.max_reaction_extent_percent <= 0.01
 
 
+def test_equilibrium_criterion_met_with_tol(simple_equilibrium_environment):
+    env = simple_equilibrium_environment
+    result = env.equilibrium(method="newton", tol=1e-10, return_details=True)
+
+    assert result.criterion_type == "residual_tol"
+    assert result.criterion_met is True
+    assert result.criterion_value < result.criterion_limit
+
+
+def test_equilibrium_criterion_met_with_extent_limit(simple_equilibrium_environment):
+    env = simple_equilibrium_environment
+    result = env.equilibrium(
+        method="bgd",
+        reaction_extent_error_limit=0.01,
+        max_iter=5000,
+        return_details=True,
+    )
+
+    assert result.criterion_type == "reaction_extent"
+    assert result.criterion_met is True
+    assert result.criterion_value <= result.criterion_limit
+
+
+def test_equilibrium_criterion_not_met_at_max_iter(simple_equilibrium_environment):
+    env = simple_equilibrium_environment
+    result = env.equilibrium(method="bgd", tol=1e-30, max_iter=1, return_details=True)
+
+    assert result.stop_reason == "max_iter"
+    assert result.criterion_type == "residual_tol"
+    assert result.criterion_met is False
+
+
 def test_equilibrium_last_result_without_return_details(simple_equilibrium_environment):
     env = simple_equilibrium_environment
     concentrations = env.equilibrium(method="newton", tol=1e-10)

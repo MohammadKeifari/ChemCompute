@@ -1179,7 +1179,9 @@ class Enviroment():
         return_details : bool, optional
             If ``True``, return an :class:`EquilibriumResult` with per-reaction
             diagnostics. Default ``False``. Regardless of this flag, the full
-            result is stored on ``last_equilibrium_result``.
+            result is stored on ``last_equilibrium_result``. The result includes
+            ``criterion_met``, which checks the final solution against
+            ``reaction_extent_error_limit`` (if set) or ``tol`` (otherwise).
 
         Returns
         -------

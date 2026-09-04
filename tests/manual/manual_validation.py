@@ -335,6 +335,7 @@ def _print_equilibrium_report(case: ManualCase, result: EquilibriumResult) -> bo
     print(f"Reaction extent %:      {[round(v, 6) for v in result.reaction_extent_percent]}")
     print(f"Max reaction extent %:  {result.max_reaction_extent_percent:.6f}")
     print(f"Q/K ratios:             {[round(v, 6) for v in result.reaction_quotient_ratio]}")
+    print(f"Criterion ({result.criterion_type}): {result.criterion_value:.6g} / {result.criterion_limit:.6g} -> {'MET' if result.criterion_met else 'NOT MET'}")
     print(f"Stop reason:            {result.stop_reason} ({result.iterations} iterations)")
     print(f"Acceptable max error:   {case.acceptable_rel_error * 100:.1f}%")
     print(f"Result:                 {'PASS' if passed else 'FAIL'}")

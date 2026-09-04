@@ -73,6 +73,10 @@ class EquilibriumResult:
     converged: bool
     stop_reason: str
     iterations: int
+    criterion_met: bool
+    criterion_type: str
+    criterion_value: float
+    criterion_limit: float
 
     @property
     def q_over_k(self) -> list[float]:
@@ -243,7 +247,20 @@ def _build_result(
     c = ctx.c0 + ctx.S @ x
     c_safe = np.maximum(c, ctx.min_concentration)
     lnQ = _compute_lnQ(ctx, c_safe)
+    residual = loss_fn.residual(lnQ, ctx.lnK)
+    residual_norm = float(np.linalg.norm(residual, ord=2))
     q_over_k = np.exp(lnQ - ctx.lnK)
+
+    if reaction_extent_error_limit is not None:
+        criterion_type = "reaction_extent"
+        criterion_value = max_percent
+        criterion_limit = float(reaction_extent_error_limit)
+        criterion_met = max_percent <= reaction_extent_error_limit
+    else:
+        criterion_type = "residual_tol"
+        criterion_value = residual_norm
+        criterion_limit = float(tol)
+        criterion_met = residual_norm < tol
 
     if stop_reason == "reaction_extent_limit":
         converged = True
@@ -262,6 +279,10 @@ def _build_result(
         converged=converged,
         stop_reason=stop_reason,
         iterations=iterations,
+        criterion_met=criterion_met,
+        criterion_type=criterion_type,
+        criterion_value=criterion_value,
+        criterion_limit=criterion_limit,
     )
 
 

@@ -364,9 +364,10 @@ result = env.equilibrium(method="newton", return_details=True)
 print(result.compounds)                   # ["A", "B"]
 print(result.reaction_extent_percent)     # per-reaction |Δx_i|/|x_i|
 print(result.max_reaction_extent_percent)
-print(result.q_over_k)                      # Q/K per reaction (1.0 = at equilibrium)
-print(result.stop_reason)                   # "reaction_extent_limit" | "residual_tol" | "max_iter"
-print(result.iterations)
+print(result.criterion_met)                 # True if active criterion satisfied
+print(result.criterion_type)                # "reaction_extent" or "residual_tol"
+print(result.criterion_value)               # measured value at final solution
+print(result.criterion_limit)               # threshold that was checked
 
 # Apply equilibrium concentrations back to the environment
 result = env.apply_equilibrium(method="newton")
