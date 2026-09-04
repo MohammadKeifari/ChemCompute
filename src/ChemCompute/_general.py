@@ -1159,6 +1159,7 @@ class Enviroment():
             Floor for log computations. Default ``1e-12``.
         concentration_error_limit : float, optional
             Stop when max relative concentration change between iterates is below this value.
+            When set, ``tol`` is ignored and convergence is determined solely by this criterion.
         huber_delta : float, optional
             Delta parameter for the ``"log_huber"`` loss. Default ``1.0``.
 

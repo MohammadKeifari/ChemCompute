@@ -6,3 +6,4 @@ dist
 __pycache__/
 *.pyc
 *.egg-info/
+manual_test_output/

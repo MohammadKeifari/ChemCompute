@@ -101,6 +101,10 @@ def _compute_jacobian(ctx: EquilibriumContext, c_safe: np.ndarray, jacobian_scal
     return jacobian_scale[:, None] * J
 
 
+def _use_residual_tolerance(concentration_error_limit: Optional[float]) -> bool:
+    return concentration_error_limit is None
+
+
 def _concentration_converged(
     c_new: np.ndarray,
     c_prev: Optional[np.ndarray],
@@ -139,7 +143,7 @@ def _run_bgd(
         lnQ = _compute_lnQ(ctx, c_safe)
         residual = loss_fn.residual(lnQ, ctx.lnK)
 
-        if np.linalg.norm(residual, ord=2) < tol:
+        if _use_residual_tolerance(concentration_error_limit) and np.linalg.norm(residual, ord=2) < tol:
             break
         if _concentration_converged(c, c_prev, ctx.min_concentration, concentration_error_limit):
             break
@@ -148,7 +152,7 @@ def _run_bgd(
         J = _compute_jacobian(ctx, c_safe, scale)
         grad = J.T @ loss_fn.grad_weights(residual)
 
-        if np.linalg.norm(grad, ord=2) < tol:
+        if _use_residual_tolerance(concentration_error_limit) and np.linalg.norm(grad, ord=2) < tol:
             break
 
         step = learning_rate
@@ -193,7 +197,7 @@ def _run_sgd(
 
             lnQ_i = ctx.A[i, :] @ np.log(c_safe)
             r_i = loss_fn.residual(np.array([lnQ_i]), np.array([ctx.lnK[i]]))[0]
-            if abs(r_i) < tol:
+            if _use_residual_tolerance(concentration_error_limit) and abs(r_i) < tol:
                 continue
 
             scale_i = loss_fn.jacobian_scale(np.array([r_i]))[0]
@@ -223,7 +227,7 @@ def _run_sgd(
         full_lnQ = _compute_lnQ(ctx, c_full_safe)
         full_residual = loss_fn.residual(full_lnQ, ctx.lnK)
 
-        if np.linalg.norm(full_residual, ord=2) < tol:
+        if _use_residual_tolerance(concentration_error_limit) and np.linalg.norm(full_residual, ord=2) < tol:
             break
         if _concentration_converged(c_full, c_prev, ctx.min_concentration, concentration_error_limit):
             break
@@ -252,7 +256,7 @@ def _run_newton(
         lnQ = _compute_lnQ(ctx, c_safe)
         residual = loss_fn.residual(lnQ, ctx.lnK)
 
-        if np.linalg.norm(residual, ord=2) < tol:
+        if _use_residual_tolerance(concentration_error_limit) and np.linalg.norm(residual, ord=2) < tol:
             break
         if _concentration_converged(c, c_prev, ctx.min_concentration, concentration_error_limit):
             break

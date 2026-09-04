@@ -51,7 +51,7 @@ pip install -e .
 from ChemCompute import Compound, Reaction, Enviroment
 ```
 
-The package must be installed (using `pip install -e .`) for these imports to work. Legacy calculator classes remain available from `ChemCompute.Kinetic` and `ChemCompute.Thermodynamic` but are deprecated.
+The package must be installed (using `pip install -e .`) for these imports to work.
 
 ## Quick Start
 
@@ -308,18 +308,6 @@ results = env.kinetics(
 )
 ```
 
-### KineticalCalculator (Deprecated)
-
-Legacy wrapper around `env.kinetics()`. Prefer `env.kinetics()` directly.
-
-```python
-from ChemCompute.Kinetic import KineticalCalculator
-
-kc = KineticalCalculator(accuracy=1e-3)
-kc.fit(env)
-results = kc.calculate(time=10.0, plot="interactive")
-```
-
 The `colors` parameter accepts:
 
 - Color name strings (e.g., `'red'`, `'blue'`, `'green'`)
@@ -364,19 +352,7 @@ equilibrium = env.equilibrium(
 - `tol`: Convergence tolerance (default depends on method)
 - `backtrack_beta`: Backtracking line search parameter (default: 0.5)
 - `min_concentration`: Minimum concentration threshold (default: 1e-12)
-- `concentration_error_limit`: Stop when max relative concentration change between iterates is below this value
-
-### EquilibriumCalculator (Deprecated)
-
-Legacy wrapper around `env.equilibrium()`. Prefer `env.equilibrium()` directly.
-
-```python
-from ChemCompute.Thermodynamic import EquilibriumCalculator
-
-eq_calc = EquilibriumCalculator(method_of_calculation="bgd")
-eq_calc.fit(env)
-equilibrium = eq_calc.calculate(max_iter=1000, tol=1e-8)
-```
+- `concentration_error_limit`: Stop when max relative concentration change between iterates is below this value. When set, `tol` is ignored.
 
 ## Examples
 
@@ -384,9 +360,8 @@ equilibrium = eq_calc.calculate(max_iter=1000, tol=1e-8)
 
 ```python
 from ChemCompute import Compound, Reaction, Enviroment
-from ChemCompute.Kinetic import KineticalCalculator
 
-# Create reaction: A ⇌ B
+# Create reaction: A <=> B
 rxn = Reaction.from_string_simple_syntax(
     "A > B",
     concentrations=[1.0, 0.0],
@@ -398,9 +373,7 @@ rxn = Reaction.from_string_simple_syntax(
 env = Enviroment(rxn, T=298)
 
 # Kinetic simulation
-kc = KineticalCalculator(accuracy=0.01)
-kc.fit(env)
-results = kc.calculate(time=10.0, plot="interactive")
+results = env.kinetics(time=10.0, accuracy=0.01, plot="interactive")
 ```
 
 ### Example 2: Multiple Reactions
@@ -415,17 +388,17 @@ rxn2 = Reaction.from_string_simple_syntax("B > C", [0.0, 0.0], K=1.5, kf=0.3, kb
 env = Enviroment(rxn1, rxn2, T=298)
 env.concentrations = [1.0, 0.0, 0.0]
 
-kc = KineticalCalculator(accuracy=0.01)
-kc.fit(env)
-results = kc.calculate(time=20.0, checkpoint_time=[5.0, 10.0, 15.0, 20.0])
+results = env.kinetics(
+    time=20.0,
+    accuracy=0.01,
+    checkpoint_time=[5.0, 10.0, 15.0, 20.0],
+)
 ```
 
 ### Example 3: Equilibrium Calculation
 
 ```python
-from ChemCompute.Thermodynamic import EquilibriumCalculator
-
-# A + 2B ⇌ C
+# A + 2B <=> C
 rxn = Reaction.from_string_simple_syntax(
     "A + 2B > C",
     concentrations=[1.0, 2.0, 0.0],
@@ -436,9 +409,7 @@ rxn = Reaction.from_string_simple_syntax(
 
 env = Enviroment(rxn, T=298)
 
-# Calculate equilibrium using Newton's method
-eq_calc = EquilibriumCalculator(method_of_calculation="newton")
-equilibrium = eq_calc.fit_calculate(env, max_iter=100, tol=1e-10)
+equilibrium = env.equilibrium(method="newton", max_iter=100, tol=1e-10)
 
 print(f"Equilibrium concentrations: {equilibrium}")
 ```
@@ -467,7 +438,6 @@ This example demonstrates using custom colors to visualize multiple compounds in
 
 ```python
 from ChemCompute import Reaction, Enviroment
-from ChemCompute.Kinetic import KineticalCalculator
 
 # Create multiple reactions with shared compounds
 rxn1 = Reaction.from_string_simple_syntax("g + a > 2a + g", kf=0.1, kb=0)
@@ -478,19 +448,14 @@ rxn3 = Reaction.from_string_simple_syntax("b > d", kf=0.1, kb=0)
 env = Enviroment(rxn1, rxn2, rxn3)
 env.concentrations = [3, 2, 1, 0]  # [g, a, b, d]
 
-# Initialize calculator
-kc = KineticalCalculator(accuracy=1e-1)
-kc.fit(env)
-
-# Define custom colors for each compound (g, a, b, d)
 custom_colors = ['#26547c', '#ef476f', '#ffd166', '#06d6a0']
 
-# Calculate and save plot with custom colors
-results = kc.calculate(
+results = env.kinetics(
     time=10,
+    accuracy=1e-1,
     plot="save",
     directory="./plot.png",
-    colors=custom_colors
+    colors=custom_colors,
 )
 
 print(f"Final concentrations: {results[-1]}")
@@ -512,9 +477,16 @@ Run specific test files:
 
 ```bash
 pytest tests/test_general.py
-pytest tests/test_kinetic.py
-pytest tests/test_thermodynamic.py
+pytest tests/test_environment_calculators.py
 ```
+
+Run the manual validation script (equilibrium checks + kinetic plots):
+
+```bash
+python tests/manual/manual_validation.py
+```
+
+Kinetic plots are saved under `manual_test_output/kinetics/`.
 
 ## Project Structure
 
@@ -525,16 +497,17 @@ ChemCompute/
 │       ├── __init__.py           # Package initialization (exports core classes)
 │       ├── _general.py           # Core classes: Compound, Reaction, Enviroment
 │       ├── _equilibrium.py       # Unified equilibrium solver and loss registry
-│       ├── _kinetics.py          # Kinetic integration logic
-│       ├── Kinetic.py            # KineticalCalculator (deprecated wrapper)
-│       └── Thermodynamic.py      # EquilibriumCalculator (deprecated wrapper)
+│       └── _kinetics.py          # Kinetic integration logic
 │
 ├── tests/                        # Test suite
 │   ├── __init__.py               # Test package initialization
 │   ├── test_general.py           # Tests for Compound, Reaction, Enviroment
-│   ├── test_kinetic.py           # Tests for KineticalCalculator
-│   └── test_thermodynamic.py     # Tests for EquilibriumCalculator
+│   ├── test_environment_calculators.py  # Tests for env.equilibrium/kinetics
+│   └── manual/
+│       └── manual_validation.py  # Manual validation (10 named environments)
 │
+├── manual_test_output/           # Generated kinetic plots from manual validation
+│   └── kinetics/
 ├── docs/                         # Documentation
 │   └── index.md                  # Documentation index
 │
@@ -721,12 +694,12 @@ The library supports four physical phases with intelligent phase determination:
 
 ### 5. Kinetic Simulation
 
-The `KineticalCalculator` class provides powerful kinetic simulation capabilities:
+Use `env.kinetics()` for time-dependent concentration integration:
 
 **Key Features:**
 
 - Numerical integration of reaction kinetics
-- Configurable time step (accuracy parameter)
+- Configurable time step (`accuracy` parameter)
 - Automatic concentration clamping (prevents negative values)
 - Checkpoint recording at specific times
 - Interactive and static plotting
@@ -734,13 +707,12 @@ The `KineticalCalculator` class provides powerful kinetic simulation capabilitie
 **Usage:**
 
 ```python
-kc = KineticalCalculator(accuracy=1e-3)  # Smaller = more accurate
-kc.fit(env)
-results = kc.calculate(
+results = env.kinetics(
     time=10.0,
-    checkpoint_time=[1.0, 5.0, 10.0],  # Record at these times
-    plot="interactive",  # or "save" or False
-    colors=['red', 'blue', 'green']  # Optional: custom colors per compound
+    accuracy=1e-3,
+    checkpoint_time=[1.0, 5.0, 10.0],
+    plot="interactive",
+    colors=['red', 'blue', 'green'],
 )
 ```
 
@@ -762,45 +734,30 @@ The `colors` parameter allows you to specify colors for each compound:
 
 ### 6. Equilibrium Calculations
 
-The `EquilibriumCalculator` class solves for equilibrium concentrations using advanced optimization algorithms:
+Use `env.equilibrium()` to solve for equilibrium concentrations:
 
 **Three Optimization Methods:**
 
 1. **Batch Gradient Descent (BGD)** - Default
-
-   - Processes all reactions simultaneously
-   - Stable and reliable
-   - Good for most systems
-
 2. **Stochastic Gradient Descent (SGD)**
-
-   - Processes reactions in random order
-   - Can be faster for large systems
-   - Useful when reactions are loosely coupled
-
 3. **Newton's Method**
-   - Uses second-order information
-   - Fastest convergence when near solution
-   - Requires good initial guess
 
 **Advanced Features:**
 
+- Pluggable loss functions (`log_quotient`, `quotient_error`, `log_huber`)
+- Optional `concentration_error_limit` stopping criterion (ignores `tol` when set)
 - Backtracking line search to ensure non-negative concentrations
-- Configurable convergence tolerance
-- Minimum concentration threshold to prevent numerical issues
 - Automatic phase exclusion (solids/liquids excluded from equilibrium)
 
 **Usage:**
 
 ```python
-eq_calc = EquilibriumCalculator(method_of_calculation="newton")
-equilibrium = eq_calc.fit_calculate(
-    env,
+equilibrium = env.equilibrium(
+    method="newton",
+    loss="log_quotient",
     max_iter=1000,
-    learning_rate=0.1,
     tol=1e-8,
-    backtrack_beta=0.5,
-    min_concentration=1e-12
+    concentration_error_limit=0.01,
 )
 ```
 

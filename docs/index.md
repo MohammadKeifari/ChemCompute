@@ -27,9 +27,7 @@ ChemCompute provides a powerful and flexible framework for:
 
 - [Compound Class](compound.md) - Working with chemical compounds
 - [Reaction Class](reaction.md) - Defining and managing chemical reactions
-- [Enviroment Class](environment.md) - Managing reaction systems (includes `equilibrium()` and `kinetics()`)
-- [KineticalCalculator](kinetic.md) - Deprecated kinetic wrapper
-- [EquilibriumCalculator](equilibrium.md) - Deprecated equilibrium wrapper
+- [Enviroment Class](environment.md) - Managing reaction systems (`equilibrium()`, `kinetics()`)
 
 ### Advanced Topics
 
@@ -51,8 +49,6 @@ ChemCompute provides a powerful and flexible framework for:
 - [Compound API](api/compound.md) - Compound class methods and properties
 - [Reaction API](api/reaction.md) - Reaction class methods and properties
 - [Enviroment API](api/environment.md) - Enviroment class methods and properties
-- [KineticalCalculator API](api/kinetic.md) - KineticalCalculator methods
-- [EquilibriumCalculator API](api/equilibrium.md) - EquilibriumCalculator methods
 
 ### Additional Resources
 
