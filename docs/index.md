@@ -131,13 +131,21 @@ results = env.kinetics(time=10.0, accuracy=1e-3, plot="interactive")
 Calculate equilibrium concentrations using multiple algorithms and loss functions:
 
 ```python
-equilibrium = env.equilibrium(
+result = env.equilibrium(
     method="newton",
     loss="log_quotient",
     max_iter=1000,
     tol=1e-8,
-    concentration_error_limit=0.01,
+    reaction_extent_error_limit=0.01,
+    return_details=True,
 )
+
+print(result.q_over_k)        # per-reaction Q/K at solution
+print(result.stop_reason)     # why the solver stopped
+print(result.iterations)
+
+# Or apply concentrations back to the environment
+result = env.apply_equilibrium(method="newton")
 ```
 
 ## Installation

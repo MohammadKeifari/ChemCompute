@@ -85,7 +85,7 @@ equilibrium = env.equilibrium(
     loss="log_quotient",
     max_iter=1000,
     tol=1e-8,
-    concentration_error_limit=0.01,  # optional: stop when iterates stabilize
+    reaction_extent_error_limit=0.01,
 )
 ```
 
@@ -329,7 +329,7 @@ equilibrium = env.equilibrium(
     tol=1e-8,
     backtrack_beta=0.5,
     min_concentration=1e-12,
-    concentration_error_limit=0.01,  # optional stopping criterion
+    reaction_extent_error_limit=0.01,
 )
 ```
 
@@ -352,7 +352,25 @@ equilibrium = env.equilibrium(
 - `tol`: Convergence tolerance (default depends on method)
 - `backtrack_beta`: Backtracking line search parameter (default: 0.5)
 - `min_concentration`: Minimum concentration threshold (default: 1e-12)
-- `concentration_error_limit`: Stop when max relative concentration change between iterates is below this value. When set, `tol` is ignored.
+- `reaction_extent_error_limit`: Stop when every reaction's isolated extent gap satisfies `|Δx_i|/|x_i| <= limit`. When set, `tol` is ignored.
+- `return_details`: If `True`, return an `EquilibriumResult` with compounds, reaction extents, per-reaction extent %, Q/K ratios, `stop_reason`, and `iterations`. The full result is always available via `env.last_equilibrium_result`.
+
+Use `env.apply_equilibrium(...)` to calculate equilibrium and write concentrations back to the environment in one step.
+
+Use `env.compound_labels` anytime to get ordered compound formula strings aligned with concentrations.
+
+```python
+result = env.equilibrium(method="newton", return_details=True)
+print(result.compounds)                   # ["A", "B"]
+print(result.reaction_extent_percent)     # per-reaction |Δx_i|/|x_i|
+print(result.max_reaction_extent_percent)
+print(result.q_over_k)                      # Q/K per reaction (1.0 = at equilibrium)
+print(result.stop_reason)                   # "reaction_extent_limit" | "residual_tol" | "max_iter"
+print(result.iterations)
+
+# Apply equilibrium concentrations back to the environment
+result = env.apply_equilibrium(method="newton")
+```
 
 ## Examples
 
@@ -745,7 +763,7 @@ Use `env.equilibrium()` to solve for equilibrium concentrations:
 **Advanced Features:**
 
 - Pluggable loss functions (`log_quotient`, `quotient_error`, `log_huber`)
-- Optional `concentration_error_limit` stopping criterion (ignores `tol` when set)
+- Optional `reaction_extent_error_limit` stopping criterion (ignores `tol` when set)
 - Backtracking line search to ensure non-negative concentrations
 - Automatic phase exclusion (solids/liquids excluded from equilibrium)
 
@@ -757,7 +775,8 @@ equilibrium = env.equilibrium(
     loss="log_quotient",
     max_iter=1000,
     tol=1e-8,
-    concentration_error_limit=0.01,
+    reaction_extent_error_limit=0.01,
+    return_details=True,
 )
 ```
 

@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from ChemCompute import Compound, Enviroment, Reaction
+from ChemCompute import Compound, Enviroment, EquilibriumResult, Reaction
 
 
 @pytest.fixture
@@ -61,29 +61,87 @@ def test_env_equilibrium_invalid_loss(simple_equilibrium_environment):
         simple_equilibrium_environment.equilibrium(loss="invalid")
 
 
-def test_env_equilibrium_concentration_error_limit(simple_equilibrium_environment):
+def test_compound_labels(simple_equilibrium_environment):
     env = simple_equilibrium_environment
-    reference = env.equilibrium(method="bgd", tol=1e-8, max_iter=5000)
+    assert env.compound_labels == ["A", "B"]
+    assert env.compound_labels == [c.formula for c in env.compounds]
+
+
+def test_equilibrium_return_details(simple_equilibrium_environment):
+    env = simple_equilibrium_environment
+    result = env.equilibrium(method="newton", tol=1e-10, return_details=True)
+
+    assert isinstance(result, EquilibriumResult)
+    assert result.compounds == ["A", "B"]
+    assert len(result.concentrations) == 2
+    assert len(result.reaction_extents) == 1
+    assert len(result.reaction_extent_percent) == 1
+    assert len(result.reaction_quotient_ratio) == 1
+    assert result.stop_reason in {"residual_tol", "reaction_extent_limit", "max_iter"}
+    assert result.iterations >= 1
+
+
+def test_reaction_extent_percent_near_equilibrium(simple_equilibrium_environment):
+    env = simple_equilibrium_environment
+    result = env.equilibrium(method="newton", tol=1e-12, return_details=True)
+
+    assert result.max_reaction_extent_percent < 1e-4
+    assert np.allclose(result.reaction_quotient_ratio, [1.0], rtol=1e-3, atol=1e-3)
+
+
+def test_reaction_extent_error_limit_stopping(simple_equilibrium_environment):
+    env = simple_equilibrium_environment
     result = env.equilibrium(
         method="bgd",
-        tol=1.0,
-        concentration_error_limit=1e-8,
+        reaction_extent_error_limit=0.01,
         max_iter=5000,
+        return_details=True,
     )
-    assert len(result) == len(reference)
-    np.testing.assert_allclose(result, reference, rtol=1e-4, atol=1e-6)
+
+    assert result.stop_reason == "reaction_extent_limit"
+    assert result.max_reaction_extent_percent <= 0.01
+    assert result.converged is True
 
 
-def test_env_equilibrium_concentration_error_limit_ignores_tol(simple_equilibrium_environment):
+def test_reaction_extent_error_limit_ignores_tol(simple_equilibrium_environment):
     env = simple_equilibrium_environment
-    reference = env.equilibrium(method="bgd", tol=1e-8, max_iter=5000)
-    result = env.equilibrium(
+    loose_tol_result = env.equilibrium(
         method="bgd",
         tol=1e30,
-        concentration_error_limit=1e-8,
+        reaction_extent_error_limit=0.01,
         max_iter=5000,
+        return_details=True,
     )
-    np.testing.assert_allclose(result, reference, rtol=1e-4, atol=1e-6)
+    assert loose_tol_result.stop_reason == "reaction_extent_limit"
+    assert loose_tol_result.max_reaction_extent_percent <= 0.01
+
+
+def test_equilibrium_last_result_without_return_details(simple_equilibrium_environment):
+    env = simple_equilibrium_environment
+    concentrations = env.equilibrium(method="newton", tol=1e-10)
+
+    assert isinstance(concentrations, list)
+    last = env.last_equilibrium_result
+    assert isinstance(last, EquilibriumResult)
+    assert last.concentrations == concentrations
+    assert last.stop_reason in {"residual_tol", "reaction_extent_limit", "max_iter"}
+    assert last.iterations >= 1
+    assert len(last.q_over_k) == 1
+    assert np.isclose(last.q_over_k[0], 1.0, rtol=1e-3, atol=1e-3)
+
+
+def test_apply_equilibrium_updates_concentrations(simple_equilibrium_environment):
+    env = simple_equilibrium_environment
+    assert env.concentrations == [1.0, 0.0]
+
+    result = env.apply_equilibrium(method="newton", tol=1e-10)
+
+    assert isinstance(result, EquilibriumResult)
+    assert env.concentrations == result.concentrations
+    assert np.isclose(env.concentrations[0], 1.0 / 3.0, rtol=1e-4)
+    assert np.isclose(env.concentrations[1], 2.0 / 3.0, rtol=1e-4)
+    assert env.last_equilibrium_result is result
+    assert result.iterations >= 1
 
 
 def test_env_kinetics_basic(simple_kinetic_environment):

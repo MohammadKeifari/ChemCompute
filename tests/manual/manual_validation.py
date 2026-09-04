@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ChemCompute import Compound, Enviroment, Reaction
+from ChemCompute import Compound, Enviroment, EquilibriumResult, Reaction
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "manual_test_output"
 KINETICS_DIR = OUTPUT_DIR / "kinetics"
@@ -164,7 +164,7 @@ env8 = Enviroment(
     T=298,
 )
 
-# env9: concentration_error_limit stopping criterion
+# env9: reaction_extent_error_limit stopping criterion
 env9 = Enviroment(
     Reaction.from_string_simple_syntax(
         "A > B",
@@ -271,14 +271,14 @@ MANUAL_CASES: list[ManualCase] = [
     ),
     ManualCase(
         name="env9",
-        description="concentration_error_limit stopping (1%)",
+        description="reaction_extent_error_limit stopping (1%)",
         env=env9,
         expected_equilibrium=[1.0 / 3.0, 2.0 / 3.0],
         acceptable_rel_error=0.02,
         equilibrium_kwargs={
             "method": "bgd",
             "loss": "log_quotient",
-            "concentration_error_limit": 0.01,
+            "reaction_extent_error_limit": 0.01,
             "max_iter": 5000,
         },
         kinetic_kwargs={"time": 8.0, "accuracy": 0.02},
@@ -313,8 +313,9 @@ def _within_tolerance(computed: list[float], expected: list[float], acceptable_r
     return max(errors) <= acceptable_rel_error
 
 
-def _print_equilibrium_report(case: ManualCase, computed: list[float]) -> bool:
+def _print_equilibrium_report(case: ManualCase, result: EquilibriumResult) -> bool:
     env = case.env
+    computed = result.concentrations
     errors = _relative_errors(computed, case.expected_equilibrium)
     passed = _within_tolerance(computed, case.expected_equilibrium, case.acceptable_rel_error)
 
@@ -322,7 +323,7 @@ def _print_equilibrium_report(case: ManualCase, computed: list[float]) -> bool:
     print(f"{case.name}: {case.description}")
     print(f"{'=' * 72}")
     print(f"Temperature (K): {env.T}")
-    print(f"Compounds: {[c.formula for c in env.compounds]}")
+    print(f"Compounds: {result.compounds}")
     print(f"Initial concentrations: {env.concentrations}")
     for idx, rxn in enumerate(env.reactions, start=1):
         print(f"Reaction {idx} K: {rxn.K:.6g}  kf: {rxn.kf:.6g}  kb: {rxn.kb:.6g}")
@@ -330,6 +331,11 @@ def _print_equilibrium_report(case: ManualCase, computed: list[float]) -> bool:
     print(f"Expected equilibrium:   {[round(v, 6) for v in case.expected_equilibrium]}")
     print(f"Computed equilibrium:   {[round(v, 6) for v in computed]}")
     print(f"Relative errors:        {[round(e, 6) for e in errors]}")
+    print(f"Reaction extents:       {[round(v, 6) for v in result.reaction_extents]}")
+    print(f"Reaction extent %:      {[round(v, 6) for v in result.reaction_extent_percent]}")
+    print(f"Max reaction extent %:  {result.max_reaction_extent_percent:.6f}")
+    print(f"Q/K ratios:             {[round(v, 6) for v in result.reaction_quotient_ratio]}")
+    print(f"Stop reason:            {result.stop_reason} ({result.iterations} iterations)")
     print(f"Acceptable max error:   {case.acceptable_rel_error * 100:.1f}%")
     print(f"Result:                 {'PASS' if passed else 'FAIL'}")
     return passed
@@ -354,8 +360,9 @@ def run_manual_validation() -> int:
     results: list[tuple[str, bool]] = []
 
     for case in MANUAL_CASES:
-        computed = case.env.equilibrium(**case.equilibrium_kwargs)
-        passed = _print_equilibrium_report(case, computed)
+        equilibrium_kwargs = {**case.equilibrium_kwargs, "return_details": True}
+        result = case.env.equilibrium(**equilibrium_kwargs)
+        passed = _print_equilibrium_report(case, result)
         results.append((case.name, passed))
         if passed:
             passed_count += 1

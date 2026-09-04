@@ -1124,6 +1124,18 @@ class Enviroment():
         for i in range(len(self.compounds_concentration)):
             self.compounds_concentration[i]["concentration"] = value[i]
 
+    @property
+    def compound_labels(self):
+        """
+        Ordered compound formula labels aligned with ``concentrations``.
+
+        Returns
+        -------
+        list[str]
+            Chemical formulas in the same order as ``self.compounds``.
+        """
+        return [compound.formula for compound in self.compounds]
+
     def equilibrium(
         self,
         *,
@@ -1134,8 +1146,9 @@ class Enviroment():
         tol=None,
         backtrack_beta: float = 0.5,
         min_concentration: float = 1e-12,
-        concentration_error_limit=None,
+        reaction_extent_error_limit=None,
         huber_delta: float = 1.0,
+        return_details: bool = False,
     ):
         """
         Calculate equilibrium concentrations for this environment.
@@ -1153,24 +1166,30 @@ class Enviroment():
             Step size. Defaults depend on ``method``.
         tol : float, optional
             Residual convergence tolerance. Defaults depend on ``method``.
+            Ignored when ``reaction_extent_error_limit`` is set.
         backtrack_beta : float, optional
             Backtracking line search factor. Default ``0.5``.
         min_concentration : float, optional
             Floor for log computations. Default ``1e-12``.
-        concentration_error_limit : float, optional
-            Stop when max relative concentration change between iterates is below this value.
-            When set, ``tol`` is ignored and convergence is determined solely by this criterion.
+        reaction_extent_error_limit : float, optional
+            Stop when every reaction's isolated extent gap satisfies
+            ``|Δx_i| / |x_i| <= limit``. When set, ``tol`` is ignored.
         huber_delta : float, optional
             Delta parameter for the ``"log_huber"`` loss. Default ``1.0``.
+        return_details : bool, optional
+            If ``True``, return an :class:`EquilibriumResult` with per-reaction
+            diagnostics. Default ``False``. Regardless of this flag, the full
+            result is stored on ``last_equilibrium_result``.
 
         Returns
         -------
-        list[float]
-            Equilibrium concentrations aligned with ``self.compounds``.
+        list[float] or EquilibriumResult
+            Equilibrium concentrations aligned with ``self.compounds``, or a full
+            result object when ``return_details=True``.
         """
         from ._equilibrium import solve_equilibrium
 
-        return solve_equilibrium(
+        result = solve_equilibrium(
             self,
             method=method,
             loss=loss,
@@ -1179,9 +1198,70 @@ class Enviroment():
             tol=tol,
             backtrack_beta=backtrack_beta,
             min_concentration=min_concentration,
-            concentration_error_limit=concentration_error_limit,
+            reaction_extent_error_limit=reaction_extent_error_limit,
             huber_delta=huber_delta,
+            return_details=True,
         )
+        self._last_equilibrium_result = result
+        if return_details:
+            return result
+        return result.concentrations
+
+    @property
+    def last_equilibrium_result(self):
+        """
+        Most recent :class:`EquilibriumResult` from ``equilibrium()`` or
+        ``apply_equilibrium()``.
+
+        Returns
+        -------
+        EquilibriumResult or None
+            None if no equilibrium calculation has been run yet.
+        """
+        return getattr(self, "_last_equilibrium_result", None)
+
+    def apply_equilibrium(
+        self,
+        *,
+        method: str = "bgd",
+        loss: str = "log_quotient",
+        max_iter=None,
+        learning_rate=None,
+        tol=None,
+        backtrack_beta: float = 0.5,
+        min_concentration: float = 1e-12,
+        reaction_extent_error_limit=None,
+        huber_delta: float = 1.0,
+    ):
+        """
+        Calculate equilibrium and write concentrations back to this environment.
+
+        Parameters
+        ----------
+        method, loss, max_iter, learning_rate, tol, backtrack_beta,
+        min_concentration, reaction_extent_error_limit, huber_delta
+            Same as :meth:`equilibrium`.
+
+        Returns
+        -------
+        EquilibriumResult
+            Full result including ``concentrations``, ``q_over_k``,
+            ``stop_reason``, and ``iterations``.
+        """
+        result = self.equilibrium(
+            method=method,
+            loss=loss,
+            max_iter=max_iter,
+            learning_rate=learning_rate,
+            tol=tol,
+            backtrack_beta=backtrack_beta,
+            min_concentration=min_concentration,
+            reaction_extent_error_limit=reaction_extent_error_limit,
+            huber_delta=huber_delta,
+            return_details=True,
+        )
+        self.concentrations = result.concentrations
+        return result
 
     def kinetics(
         self,
