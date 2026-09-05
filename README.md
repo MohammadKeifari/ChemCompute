@@ -382,9 +382,53 @@ pytest tests/
 python tests/manual/manual_validation.py   # 20 named equilibrium/kinetics cases
 ```
 
-See also `tests/test_environment.py` for equilibrium, composition, buffering, titration, activity, UV–Vis, and bio kinetics.
+See also `tests/test_environment.py` for equilibrium, composition, buffering, titration, half-reactions, Pourbaix, activity, UV–Vis, and bio kinetics.
 
 Kinetic plots from manual validation are written to `manual_test_output/kinetics/`.
+
+---
+
+## Half-reactions and Pourbaix diagrams
+
+Half-reactions use **`@e`** as the electron token (never `e` or `e-` in `Reaction` strings). Species and concentrations mirror `Reaction`:
+
+```python
+from ChemCompute import Compound, Enviroment, HalfReaction, Pourbaix
+
+hr = HalfReaction.from_string_simple_syntax(
+    "Fe+3 + @e = Fe+2",
+    concentrations=[0.01, 0.001],  # [Fe+3], [Fe+2] — no slot for @e
+    E0=0.771,
+)
+
+env = Enviroment(
+    hr,
+    concentrations={"H+": 1e-7},
+    buffer=["H+"],
+)
+
+env.set_electrode_potential(Eh=0.44)  # fixed E (V vs SHE)
+env.equilibrium()
+
+E = hr.E_at(env)  # Nernst E from concentrations
+
+diagram = Pourbaix(env, track_species=["Fe+3", "Fe+2"], pH_steps=30, Eh_steps=30).run()
+diagram.plot_boundaries(save="pourbaix.png", show=False)
+```
+
+Complex syntax uses `=` and `&`:
+
+```python
+HalfReaction.from_string_complex_syntax(
+    "Fe(OH)3.s & 3_H+ + @e = Fe+2 & 3_H2O.l",
+    concentrations=[1.0, 1e-7, 0.05, 1.0],
+    E0=-0.55,
+)
+```
+
+Pass half-reactions directly to `Enviroment(rxn1, hr1, hr2, ...)`. With **two or more** half-reactions and no imposed `electrode_Eh`, equilibrium solves a **shared electrode potential** jointly with concentrations.
+
+**Phase rules:** only explicit `.s` / `.l` solids and liquids are omitted from Q (activity 1). Undetermined phase stays in Q at concentration.
 
 ---
 
@@ -400,6 +444,8 @@ src/ChemCompute/
   _buffering.py    Solver-side constant-pH / species buffering
   _mixing.py       Environment combine and ScaledEnviroment
   _titration.py    Titration curves (sample + titrant environments)
+  _half_reaction.py HalfReaction, Nernst electrode potential coupling
+  _pourbaix.py     Pourbaix diagram scanner and PourbaixResult
   _uvvis.py        Beer-Lambert spectra
   _bio_kinetics.py Michaelis-Menten and inhibition integrator
   bio_templates/   Premade enzyme-kinetics environments

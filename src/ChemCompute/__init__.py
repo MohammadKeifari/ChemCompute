@@ -1,5 +1,7 @@
 from ._general import *
 from ._equilibrium import EquilibriumResult
+from ._half_reaction import HalfReaction, BoundaryLine
+from ._pourbaix import Pourbaix, PourbaixResult
 from ._activity import ActivityModel, VALID_ACTIVITY_MODELS, ionic_strength, resolve_charge
 from ._buffer import BufferDiagnostics, BufferPairDiagnostics, buffer_diagnostics
 from ._mixing import ScaledEnviroment, combine_environments

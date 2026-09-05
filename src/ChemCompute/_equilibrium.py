@@ -82,6 +82,8 @@ class EquilibriumResult:
     criterion_type: str
     criterion_value: float
     criterion_limit: float
+    electrode_Eh: Optional[float] = None
+    """Imposed or solved electrode potential (V vs SHE), when redox coupling is active."""
 
     @property
     def q_over_k(self) -> list[float]:
@@ -108,6 +110,8 @@ class EquilibriumContext:
     excess_source_mask: np.ndarray
     env: object = None
     ln_gamma: np.ndarray = None
+    redox_indices: np.ndarray = None
+    couple_eh: bool = False
 
 
 def _update_activity(ctx: EquilibriumContext, c: np.ndarray) -> None:
@@ -201,6 +205,11 @@ def _build_context(env, min_concentration: float) -> EquilibriumContext:
     for j in getattr(env, "buffer_indices", []):
         S[j, :] = 0.0
 
+    from ._half_reaction import coupled_eh_mode, redox_reaction_indices
+
+    redox_indices = np.array(redox_reaction_indices(env), dtype=int)
+    couple_eh = coupled_eh_mode(env)
+
     ctx = EquilibriumContext(
         N=N, S=S, A=A, c0=c0, lnK=lnK, R=R, C=C,
         min_concentration=min_concentration,
@@ -208,6 +217,8 @@ def _build_context(env, min_concentration: float) -> EquilibriumContext:
         excess_source_mask=excess_source_mask,
         env=env,
         ln_gamma=np.zeros(C, dtype=float),
+        redox_indices=redox_indices,
+        couple_eh=couple_eh,
     )
     _update_activity(ctx, c0)
     return ctx
@@ -444,6 +455,7 @@ def _build_result(
         criterion_type=criterion_type,
         criterion_value=criterion_value,
         criterion_limit=criterion_limit,
+        electrode_Eh=getattr(ctx, "solved_electrode_Eh", None),
     )
 
 
@@ -635,6 +647,111 @@ def _run_newton(
     return concentrations, x, stop_reason, iteration + 1
 
 
+def _refresh_redox_lnK(ctx: EquilibriumContext, x: np.ndarray, Eh: float) -> None:
+    from ._half_reaction import compute_pH, redox_lnK
+
+    env = ctx.env
+    c = ctx.c0 + ctx.S @ x
+    pH = compute_pH(env, c)
+    for hr in getattr(env, "half_reactions", None) or []:
+        idx = hr._reaction_index
+        if idx is None:
+            continue
+        ctx.lnK[idx] = redox_lnK(hr, Eh, pH, env.T)
+
+
+def _coupled_eh_residual(
+    ctx: EquilibriumContext,
+    x: np.ndarray,
+    Eh: float,
+    loss_fn: EquilibriumLoss,
+) -> np.ndarray:
+    _refresh_redox_lnK(ctx, x, Eh)
+    c = ctx.c0 + ctx.S @ x
+    c_safe = _safe_concentrations(c, ctx.min_concentration)
+    return _active_residual(ctx, c_safe, loss_fn, c_actual=c)
+
+
+def _coupled_eh_jacobian(
+    ctx: EquilibriumContext,
+    x: np.ndarray,
+    Eh: float,
+    loss_fn: EquilibriumLoss,
+    residual: np.ndarray,
+) -> np.ndarray:
+    from ._half_reaction import d_redox_lnK_dEh
+
+    c = ctx.c0 + ctx.S @ x
+    c_safe = _safe_concentrations(c, ctx.min_concentration)
+    jx = _active_jacobian(ctx, c_safe, loss_fn, residual)
+    deh = np.zeros(ctx.R, dtype=float)
+    env = ctx.env
+    for hr in getattr(env, "half_reactions", None) or []:
+        idx = hr._reaction_index
+        if idx is None or ctx.infinite_k_mask[idx]:
+            continue
+        deh[idx] = -d_redox_lnK_dEh(hr, env.T) * loss_fn.jacobian_scale(residual)[idx]
+    return np.column_stack([jx, deh])
+
+
+def _run_newton_coupled_eh(
+    ctx: EquilibriumContext,
+    loss_fn: EquilibriumLoss,
+    max_iter: int,
+    learning_rate: float,
+    tol: float,
+    backtrack_beta: float,
+    quotient_error_limit: Optional[float],
+):
+    from ._half_reaction import initial_eh_guess
+
+    x = _initialize_extents(ctx)
+    Eh = initial_eh_guess(ctx.env)
+    stop_reason = "max_iter"
+
+    for iteration in range(max_iter):
+        residual = _coupled_eh_residual(ctx, x, Eh, loss_fn)
+        errors = _reaction_quotient_errors(ctx, x)
+        if _quotient_error_converged(errors, quotient_error_limit, ctx.infinite_k_mask):
+            stop_reason = "quotient_error_limit"
+            break
+        if _use_residual_tolerance(quotient_error_limit) and np.linalg.norm(residual, ord=2) < tol:
+            stop_reason = "residual_tol"
+            break
+
+        J = _coupled_eh_jacobian(ctx, x, Eh, loss_fn, residual)
+        try:
+            step_vec, *_ = np.linalg.lstsq(J, residual, rcond=None)
+        except Exception:
+            step_vec = np.linalg.pinv(J) @ residual
+        dx = step_vec[: ctx.R]
+        dEh = float(step_vec[ctx.R]) if len(step_vec) > ctx.R else 0.0
+        dx[ctx.infinite_k_mask] = 0.0
+
+        step = learning_rate
+        f_curr = loss_fn.objective(residual)
+        while True:
+            x_new = x - step * dx
+            x_new = _apply_infinite_k_extents(ctx, x_new)
+            Eh_new = Eh - step * dEh
+            c_new = ctx.c0 + ctx.S @ x_new
+            if np.all(c_new >= -1e-15):
+                c_new_safe = _safe_concentrations(c_new, ctx.min_concentration)
+                r_new = _coupled_eh_residual(ctx, x_new, Eh_new, loss_fn)
+                f_new = loss_fn.objective(r_new)
+                if f_new <= f_curr or step < 1e-12:
+                    x = x_new
+                    Eh = Eh_new
+                    break
+            step *= backtrack_beta
+    else:
+        iteration = max_iter - 1
+
+    ctx.solved_electrode_Eh = float(Eh)
+    concentrations, x = _finalize(ctx, x)
+    return concentrations, x, stop_reason, iteration + 1
+
+
 def solve_equilibrium(
     env,
     *,
@@ -659,6 +776,11 @@ def solve_equilibrium(
     learning_rate = defaults["learning_rate"] if learning_rate is None else learning_rate
     tol = defaults["tol"] if tol is None else tol
 
+    from ._half_reaction import apply_electrode_potential, coupled_eh_mode
+
+    if not coupled_eh_mode(env):
+        apply_electrode_potential(env)
+
     ctx = _build_context(env, min_concentration)
     loss_fn = EquilibriumLoss(loss, delta=huber_delta)
 
@@ -670,12 +792,19 @@ def solve_equilibrium(
         "quotient_error_limit": quotient_error_limit,
     }
 
-    if method == "bgd":
+    solved_eh = getattr(env, "electrode_Eh", None)
+    if ctx.couple_eh:
+        concentrations, x, stop_reason, iterations = _run_newton_coupled_eh(ctx, loss_fn, **solver_kwargs)
+        solved_eh = getattr(ctx, "solved_electrode_Eh", solved_eh)
+    elif method == "bgd":
         concentrations, x, stop_reason, iterations = _run_bgd(ctx, loss_fn, **solver_kwargs)
     elif method == "sgd":
         concentrations, x, stop_reason, iterations = _run_sgd(ctx, loss_fn, **solver_kwargs)
     else:
         concentrations, x, stop_reason, iterations = _run_newton(ctx, loss_fn, **solver_kwargs)
+
+    if solved_eh is None and getattr(env, "electrode_Eh", None) is not None:
+        solved_eh = env.electrode_Eh
 
     env._equilibrium_x_solution = x
 
@@ -690,6 +819,7 @@ def solve_equilibrium(
         iterations,
         quotient_error_limit,
     )
+    result.electrode_Eh = solved_eh
 
     if return_details:
         return result

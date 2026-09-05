@@ -223,6 +223,12 @@ class Reaction:
         
         counter = 0 
         for compound in self.reactants :
+            from ._half_reaction import _reject_electron_formula
+            spec = compound.get("compound")
+            if isinstance(spec, str):
+                _reject_electron_formula(spec)
+            elif hasattr(spec, "formula"):
+                _reject_electron_formula(spec.formula)
             compound.update({"concentration" : reactants_concentration[counter]})
             reactant = compound.copy()
             reactant.update({"type" : "reactant"})
@@ -230,6 +236,12 @@ class Reaction:
             counter += 1
         counter = 0
         for compound in self.products :
+            from ._half_reaction import _reject_electron_formula
+            spec = compound.get("compound")
+            if isinstance(spec, str):
+                _reject_electron_formula(spec)
+            elif hasattr(spec, "formula"):
+                _reject_electron_formula(spec.formula)
             compound.update({"concentration" : products_concentration[counter]})
             product = compound.copy()
             product.update({"type" : "product"})
@@ -339,6 +351,9 @@ class Reaction:
         
         for section in inputed_reactants :
             reactant = section["compound"]
+            if isinstance(reactant, str):
+                from ._half_reaction import _reject_electron_formula
+                _reject_electron_formula(reactant)
             if re.match(r'^.*\.(s|g|l)$', reactant):  
                 inputed_reactants[counter]["compound"] = Compound(formula=reactant[0:len(reactant)-2] , phase_point_list=[{"temperature" : T , "phase" : reactant[len(reactant)-1]}])
             elif re.match(r'^.*\.aq$', reactant):
@@ -350,6 +365,9 @@ class Reaction:
         counter = 0
         for section in inputed_products :
             product = section["compound"]
+            if isinstance(product, str):
+                from ._half_reaction import _reject_electron_formula
+                _reject_electron_formula(product)
             if re.match(r'^.*\.(s|g|l)$', product):  
                 inputed_products[counter]["compound"] = Compound(formula=product[0:len(product)-2] , phase_point_list=[{"temperature" : T , "phase" : product[len(product)-1]}])
             elif re.match(r'^.*\.aq$', product):
@@ -503,6 +521,9 @@ class Reaction:
         
         for section in inputed_reactants :
             reactant = section["compound"]
+            if isinstance(reactant, str):
+                from ._half_reaction import _reject_electron_formula
+                _reject_electron_formula(reactant)
             if re.match(r'^.*\.(s|g|l)$', reactant):  
                 inputed_reactants[counter]["compound"] = Compound(formula=reactant[0:len(reactant)-2] , phase_point_list=[{"temperature" : T , "phase" : reactant[len(reactant)-1]}])
             elif re.match(r'^.*\.aq$', reactant):
@@ -513,6 +534,9 @@ class Reaction:
         counter = 0
         for section in inputed_products :
             product = section["compound"]
+            if isinstance(product, str):
+                from ._half_reaction import _reject_electron_formula
+                _reject_electron_formula(product)
             if re.match(r'^.*\.(s|g|l)$', product):  
                 inputed_products[counter]["compound"] = Compound(formula=product[0:len(product)-2] , phase_point_list=[{"temperature" : T , "phase" : product[len(product)-1]}])
             elif re.match(r'^.*\.aq$', product):
@@ -821,22 +845,33 @@ class Enviroment():
             return True
         else:
             raise ValueError("Only Reaction objects can be added to Enviroment.")
+
+    def _add_half_reaction_item(self, half_reaction):
+        from ._half_reaction import HalfReaction, register_half_reactions
+
+        if not isinstance(half_reaction, HalfReaction):
+            raise ValueError("Expected a HalfReaction instance.")
+        half_reaction.attach_or_create(self)
+        register_half_reactions(self, [half_reaction])
+        return half_reaction
         
     def __init__(
         self,
-        *reactions,
+        *items,
         T=298,
         adjust_thermodynamics=True,
         activity_model=None,
         concentrations=None,
         volume=1.0,
         buffer=None,
+        half_reactions=None,
+        electrode_Eh=None,
     ):
         """
-        Initialize the environment and add one or more reactions.
+        Initialize the environment and add reactions and/or half-reactions.
 
         Args:
-            *reactions (Reaction): Variable number of Reaction objects.
+            *items (Reaction | HalfReaction): Reactions and half-reactions in any order.
             T (float, optional): Temperature of the environment (K). Default is 298 K.
             adjust_thermodynamics (bool, optional): If True, update K/kf/kb when T changes.
                 If False, K/kf/kb remain constant (default True).
@@ -849,27 +884,45 @@ class Enviroment():
                 equilibrium and kinetics. Use ``buffer=["H+"]`` with ``concentrations={"H+": ...}``
                 for constant pH. Dict values set explicit targets; list entries snap from current
                 concentrations after build.
+            half_reactions (list[HalfReaction], optional): Additional half-reactions to register.
+            electrode_Eh (float, optional): Fixed electrode potential vs SHE (V). When set,
+                redox equilibrium constants follow the Nernst equation at this potential.
 
         Raises:
-            ValueError: If any reaction argument is not a Reaction object.
+            ValueError: If any positional item is not a Reaction or HalfReaction.
         """
         from ._activity import normalize_activity_model
+        from ._half_reaction import HalfReaction, register_half_reactions
 
         if volume <= 0:
             raise ValueError("Environment volume must be positive.")
 
         self.reactions = []
+        self.half_reactions = []
+        self._electrode_Eh = electrode_Eh
+        self._T = T
         self.adjust_thermodynamics = adjust_thermodynamics
         self.charge_map = {}
         self.spectra = {}
         self._activity_model = normalize_activity_model(activity_model)
         self.volume = float(volume)
-        for reaction in reactions:
-            if self._check_if_reaction(reaction):
-                reaction._adjust_thermodynamics = adjust_thermodynamics
-                reaction.T = T
-                self.reactions.append(reaction)
-        self._T = T
+        for item in items:
+            if isinstance(item, Reaction):
+                item._adjust_thermodynamics = adjust_thermodynamics
+                item.T = T
+                self.reactions.append(item)
+            elif isinstance(item, HalfReaction):
+                item.T = T
+                self._add_half_reaction_item(item)
+            else:
+                raise ValueError(
+                    "Enviroment items must be Reaction or HalfReaction instances."
+                )
+        if half_reactions:
+            for hr in half_reactions:
+                hr.T = T
+                hr.attach_or_create(self)
+            register_half_reactions(self, half_reactions)
         self.compounds = []
         self.compounds_concentration = []
         self._rebuild_compound_list()
@@ -906,6 +959,8 @@ class Enviroment():
 
         env = cls.__new__(cls)
         env.reactions = []
+        env.half_reactions = []
+        env._electrode_Eh = None
         env.adjust_thermodynamics = adjust_thermodynamics
         env.charge_map = {}
         env.spectra = {}
@@ -1110,9 +1165,58 @@ class Enviroment():
         new_env._buffer_spec = dict(getattr(self, "_buffer_spec", {}))
         new_env._buffer_targets = dict(getattr(self, "_buffer_targets", {}))
         new_env._last_equilibrium_result = None
+        new_env.half_reactions = copy_module.deepcopy(getattr(self, "half_reactions", []))
+        new_env._electrode_Eh = getattr(self, "_electrode_Eh", None)
+        for hr in new_env.half_reactions:
+            if hr._reaction_index is not None and hr._reaction_index < len(new_env.reactions):
+                pass
+            else:
+                hr._reaction_index = None
+                hr.attach_or_create(new_env)
         for reaction in new_env.reactions:
             reaction._adjust_thermodynamics = new_env.adjust_thermodynamics
         return new_env
+
+    @property
+    def electrode_Eh(self):
+        """User-imposed electrode potential vs SHE (V), or None for coupled solve."""
+        return getattr(self, "_electrode_Eh", None)
+
+    def set_electrode_potential(self, Eh: float):
+        """Fix electrode potential during equilibrium (Pourbaix / potentiostat)."""
+        self._electrode_Eh = float(Eh)
+
+    def clear_electrode_potential(self):
+        """Clear imposed electrode potential and restore linked reaction K values."""
+        from ._half_reaction import apply_electrode_potential
+
+        self._electrode_Eh = None
+        for hr in getattr(self, "half_reactions", None) or []:
+            idx = hr._reaction_index
+            if idx is None or idx >= len(self.reactions):
+                continue
+            rxn = self.reactions[idx]
+            if hasattr(rxn, "_K_ref"):
+                rxn.K = rxn._K_ref
+
+    def register_half_reactions(self, half_reactions):
+        """Register additional half-reactions on this environment."""
+        from ._half_reaction import register_half_reactions
+
+        for hr in half_reactions:
+            hr.attach_or_create(self)
+        register_half_reactions(self, half_reactions)
+        self._rebuild_compound_list()
+
+    def electrode_potential(self, half_reaction=None):
+        """Return Nernst E (V vs SHE) for one or all half-reactions."""
+        hrs = getattr(self, "half_reactions", None) or []
+        if not hrs:
+            return None
+        if half_reaction is not None:
+            return half_reaction.E_at(self)
+        values = [hr.E_at(self) for hr in hrs]
+        return float(sum(values) / len(values))
 
     def buffer_diagnostics(self, equilibrium_concentrations=None):
         """Compute buffer capacity and Henderson-Hasselbalch diagnostics."""
@@ -1550,6 +1654,7 @@ class Enviroment():
                 criterion_type="no_reactions",
                 criterion_value=0.0,
                 criterion_limit=0.0,
+                electrode_Eh=getattr(self, "electrode_Eh", None),
             )
             self._last_equilibrium_result = result
             if return_details:
@@ -1665,6 +1770,14 @@ class Enviroment():
         """
         from ._kinetics import integrate_kinetics
         from ._bio_kinetics import integrate_bio_kinetics, uses_bio_kinetics
+        import warnings
+
+        if getattr(self, "half_reactions", None):
+            warnings.warn(
+                "Half-reactions and electrode potential are not applied during kinetics; "
+                "concentrations evolve with static reaction K values.",
+                stacklevel=2,
+            )
 
         if checkpoint_time is None:
             checkpoint_time = []

@@ -11,6 +11,8 @@ from ChemCompute import (
     Compound,
     Enviroment,
     EquilibriumResult,
+    HalfReaction,
+    Pourbaix,
     Reaction,
     ScaledEnviroment,
     SpectrumSpec,
@@ -917,6 +919,184 @@ class TestUVVis:
         env.concentrations = [0.002, 0.0]
         a2 = uvvis_spectrum(env, wavelengths=[500e-9], path_length=0.01)[0]
         assert np.isclose(a2, 2 * a1)
+
+
+# --- Phase, half-reactions, Pourbaix ---
+
+
+def test_undetermined_phase_stays_in_quotient():
+    from ChemCompute._equilibrium import _build_context, _compute_lnQ
+
+    a = Compound("A")
+    b = Compound("B")
+    rxn = Reaction(
+        [{"stoichiometric_coefficient": 1, "compound": a, "rate_dependency": 1}],
+        [{"stoichiometric_coefficient": 1, "compound": b, "rate_dependency": 1}],
+        [0.5],
+        [0.5],
+        K=1.0,
+    )
+    env = Enviroment(rxn)
+    ctx = _build_context(env, min_concentration=1e-12)
+    assert ctx.A[0, 0] != 0.0
+    assert ctx.A[0, 1] != 0.0
+    base = np.array([0.5, 0.5])
+    perturbed = np.array([0.5, 2.0])
+    assert not np.isclose(_compute_lnQ(ctx, base), _compute_lnQ(ctx, perturbed))
+
+
+def test_half_reaction_string_concentrations_and_e_at():
+    from ChemCompute import HalfReaction
+
+    hr = HalfReaction.from_string_simple_syntax(
+        "Fe+3 + @e = Fe+2",
+        concentrations=[0.01, 0.001],
+        E0=0.771,
+    )
+    assert hr.n_electrons == 1.0
+    assert hr.oxidized_concentration == [0.01]
+    assert hr.reduced_concentration == [0.001]
+    assert hr.E_at() == pytest.approx(0.83013, rel=1e-3)
+
+
+def test_half_reaction_complex_syntax_and_h_plus_slope():
+    from ChemCompute import HalfReaction
+
+    hr = HalfReaction.from_string_complex_syntax(
+        "Fe(OH)3.s & 3_H+ + @e = Fe+2 & 3_H2O.l",
+        concentrations=[1.0, 1e-7, 0.05, 1.0],
+        E0=-0.55,
+    )
+    assert hr.net_h_plus_stoichiometry() == 3.0
+    e_low = hr.E_at_pH(0.0)
+    e_high = hr.E_at_pH(7.0)
+    assert e_high < e_low
+
+
+def test_reaction_rejects_electron_formula():
+    with pytest.raises(ValueError, match="Electrons belong"):
+        Reaction(
+            [{"stoichiometric_coefficient": 1, "compound": Compound("e-"), "rate_dependency": 1}],
+            [{"stoichiometric_coefficient": 1, "compound": Compound("A"), "rate_dependency": 1}],
+            [1.0],
+            [0.0],
+        )
+
+
+def test_env_mixed_reaction_and_half_reaction_constructor():
+    from ChemCompute import HalfReaction
+
+    hr = HalfReaction.from_string_simple_syntax(
+        "Fe+3 + @e = Fe+2",
+        concentrations=[0.01, 0.001],
+        E0=0.771,
+    )
+    env = Enviroment(hr)
+    assert len(env.half_reactions) == 1
+    assert env.compound_labels == ["Fe+3", "Fe+2"]
+
+
+def test_fixed_electrode_potential_equilibrium():
+    from ChemCompute import HalfReaction
+
+    hr = HalfReaction.from_string_simple_syntax(
+        "Fe+3 + @e = Fe+2",
+        concentrations=[0.01, 0.001],
+        E0=0.771,
+    )
+    env = Enviroment(hr)
+    env.set_electrode_potential(Eh=0.44)
+    result = env.equilibrium(method="newton", return_details=True)
+    assert result.electrode_Eh == pytest.approx(0.44)
+    assert np.allclose(result.q_over_k, [1.0], rtol=1e-3, atol=1e-3)
+
+
+def test_coupled_electrode_potential_two_half_reactions():
+    from ChemCompute import HalfReaction
+
+    hr_fe = HalfReaction.from_string_simple_syntax(
+        "Fe+3 + @e = Fe+2",
+        concentrations=[0.01, 0.001],
+        E0=0.771,
+    )
+    hr_ce = HalfReaction.from_string_simple_syntax(
+        "Ce+4 + @e = Ce+3",
+        concentrations=[0.01, 0.001],
+        E0=1.72,
+    )
+    env = Enviroment(hr_fe, hr_ce)
+    result = env.equilibrium(method="newton", return_details=True)
+    assert result.electrode_Eh is not None
+    assert np.allclose(result.q_over_k, [1.0, 1.0], rtol=1e-3, atol=1e-3)
+
+
+def test_duplicate_half_reaction_registration_raises():
+    from ChemCompute import HalfReaction
+
+    hr1 = HalfReaction.from_string_simple_syntax("Fe+3 + @e = Fe+2", E0=0.771)
+    hr2 = HalfReaction.from_string_simple_syntax("Fe+3 + @e = Fe+2", E0=0.5)
+    env = Enviroment()
+    env.register_half_reactions([hr1])
+    with pytest.raises(ValueError, match="Duplicate"):
+        env.register_half_reactions([hr2])
+
+
+def test_kinetics_warns_when_half_reactions_present():
+    from ChemCompute import HalfReaction
+    import warnings
+
+    hr = HalfReaction.from_string_simple_syntax("Fe+3 + @e = Fe+2", E0=0.771)
+    env = Enviroment(
+        Reaction.from_string_simple_syntax("A > B", concentrations=[1.0, 0.0], K=1.0),
+        hr,
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        env.kinetics(time=0.01, checkpoint_time=[0.01], plot=False)
+    assert any("Half-reactions" in str(w.message) for w in caught)
+
+
+def test_copy_preserves_half_reactions_and_electrode_eh():
+    from ChemCompute import HalfReaction
+
+    hr = HalfReaction.from_string_simple_syntax(
+        "Fe+3 + @e = Fe+2",
+        concentrations=[0.01, 0.001],
+        E0=0.771,
+    )
+    env = Enviroment(hr, electrode_Eh=0.25)
+    copied = env.copy()
+    assert copied.electrode_Eh == 0.25
+    assert len(copied.half_reactions) == 1
+    assert copied.half_reactions[0]._reaction_index is not None
+
+
+def test_pourbaix_grid_run():
+    from ChemCompute import HalfReaction, Pourbaix
+
+    hr = HalfReaction.from_string_simple_syntax(
+        "Fe+3 + @e = Fe+2",
+        concentrations=[0.01, 0.001],
+        E0=0.771,
+    )
+    h = aq("H+", charge=1)
+    env = Enviroment(
+        hr,
+        concentrations={"H+": 1e-7},
+        buffer=["H+"],
+    )
+    diagram = Pourbaix(
+        env,
+        track_species=["Fe+3", "Fe+2"],
+        pH_steps=5,
+        Eh_steps=5,
+        pH_min=1,
+        pH_max=3,
+        Eh_min=0.0,
+        Eh_max=0.8,
+    ).run()
+    assert diagram.grid_dominant.shape == (5, 5)
+    assert len(diagram.boundary_lines) == 1
 
 
 # --- Bio kinetics ---
