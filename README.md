@@ -1,43 +1,19 @@
 # ChemCompute
 
-A Python library for chemical reaction simulation, including kinetic modeling and thermodynamic equilibrium calculations.
+ChemCompute models multi-reaction chemical systems in Python. You define compounds and reactions once, wrap them in an `Enviroment`, and then run either:
 
-## Features
+- **Equilibrium** — solve for concentrations where each reaction satisfies its mass-action expression (Q/K)
+- **Kinetics** — integrate concentrations forward in time from rate laws
 
-- **Chemical Compound Representation**: Create and manage chemical compounds with formulas, phases, and physical properties
-- **Reaction Definition**: Define chemical reactions with reactants, products, stoichiometric coefficients, and rate constants
-- **Temperature-Dependent Calculations**: Automatic updates of rate constants and equilibrium constants using Arrhenius and van't Hoff equations
-- **Thermodynamic Properties**: Support for enthalpy, entropy, and activation energies for temperature-dependent simulations
-- **Kinetic Simulation**: Simulate time-dependent concentration changes using numerical integration
-- **Equilibrium Calculations**: Calculate equilibrium concentrations using multiple optimization algorithms:
-  - Batch Gradient Descent (BGD)
-  - Stochastic Gradient Descent (SGD)
-  - Newton's Method
-- **Phase Support**: Handle different phases (solid, liquid, gas, aqueous) with temperature-dependent phase transitions
-- **Unicode Formula Display**: Automatic conversion to Unicode subscripts and superscripts for chemical formulas
-- **Visualization**: Interactive and static plotting capabilities for kinetic simulations
+Both paths share the same reaction network, stoichiometry, and concentration state.
 
 ## Installation
 
-### Requirements
-
-- Python 3.7+
-- NumPy
-- Matplotlib (for plotting features)
-
-### Installation from PyPI (Recommended)
-
-The easiest way to install ChemCompute is using pip:
-
 ```bash
-pip install chemcompute==0.1.1
+pip install chemcompute
 ```
 
-This will automatically install all required dependencies (numpy and matplotlib).
-
-### Installation from Source
-
-If you want to install from source or contribute to the project:
+From source:
 
 ```bash
 git clone <repository-url>
@@ -45,878 +21,217 @@ cd ChemCompute
 pip install -e .
 ```
 
-**Important:** After installation, you can import the package directly using:
+Requires Python 3.7+, NumPy, and Matplotlib (for plots).
 
 ```python
-from ChemCompute import Compound, Reaction, Enviroment
+from ChemCompute import Compound, Reaction, Enviroment, EquilibriumResult
 ```
 
-The package must be installed (using `pip install -e .`) for these imports to work.
+---
 
-## Quick Start
+## Build a reaction system
 
-### Basic Usage
-
-```python
-from ChemCompute import Compound, Reaction, Enviroment
-
-# Create compounds
-A = Compound("A")
-B = Compound("B")
-
-# Create a reaction: A ⇌ B
-rxn = Reaction.from_string_simple_syntax(
-    "A > B",
-    concentrations=[1.0, 0.0],  # [A_initial, B_initial]
-    K=2.0,  # Equilibrium constant
-    kf=0.5,  # Forward rate constant
-    kb=0.25  # Backward rate constant
-)
-
-# Create environment
-env = Enviroment(rxn, T=298)  # Temperature in Kelvin
-
-# Kinetic simulation
-results = env.kinetics(time=10.0, accuracy=1e-3, plot=False)
-
-# Equilibrium calculation
-equilibrium = env.equilibrium(
-    method="bgd",
-    loss="log_quotient",
-    max_iter=1000,
-    tol=1e-8,
-    quotient_error_limit=0.01,
-)
-```
-
-## Core Components
-
-### Compound
-
-Represents a chemical compound with formula, phase information, and physical properties.
-
-```python
-# Simple compound
-water = Compound("H2O")
-
-# Compound with phase information
-co2_gas = Compound("CO2", phase_point_list=[{"phase": "g", "temperature": 298}])
-
-# Compound with melting/boiling points
-ethanol = Compound("C2H5OH", mp=-114, bp=78)
-
-# Disable Unicode formatting
-simple = Compound("H2O", scription=False)
-```
-
-**Attributes:**
-
-- `formula`: Chemical formula string
-- `unicode_formula`: Unicode representation with subscripts/superscripts
-- `phase_point_list`: List of phase data points
-- `mp`: Melting point
-- `bp`: Boiling point
-
-**Methods:**
-
-- `phase(temperature)`: Determine phase at given temperature
-
-### Reaction
-
-Represents a chemical reaction with reactants, products, and kinetic/thermodynamic parameters.
-
-#### Creating Reactions
-
-**From Simple Syntax:**
-
-```python
-# Simple: A ⇌ B
-rxn1 = Reaction.from_string_simple_syntax("A > B", concentrations=[1.0, 0.0])
-
-# With stoichiometry: 2A + B ⇌ 3C
-rxn2 = Reaction.from_string_simple_syntax("2A + B > 3C", concentrations=[1.0, 1.0, 0.0])
-
-# With phases: A.g + B.l ⇌ C.aq
-rxn3 = Reaction.from_string_simple_syntax("A.g + B.l > C.aq")
-
-# With rate dependencies: A2 + B1 > C1
-rxn4 = Reaction.from_string_simple_syntax("A2 + B1 > C1")
-
-# With thermodynamic parameters for temperature-dependent calculations
-rxn5 = Reaction.from_string_simple_syntax(
-    "A > B",
-    concentrations=[1.0, 0.0],
-    K=2.0,
-    kf=0.5,
-    kb=0.25,
-    enthalpy=-50000,  # J/mol (exothermic)
-    entropy=-100,     # J/(mol·K)
-    activation_energy_forward=50000,   # J/mol
-    activation_energy_backward=100000, # J/mol
-    T=298
-)
-```
-
-**From Complex Syntax:**
-
-```python
-# Complex syntax supports more flexible compound names
-rxn = Reaction.from_string_complex_syntax(
-    "2_Fe(CN)6_-3 & Ce+2 > 2_Fe(CN)6_-4 & Ce+3",
-    concentrations=[1.0, 1.0, 0.0, 0.0],
-    K=1e5,
-    kf=0.1,
-    kb=1e-6,
-    enthalpy=-75000,  # J/mol
-    entropy=-150,     # J/(mol·K)
-    activation_energy_forward=60000,   # J/mol
-    activation_energy_backward=135000, # J/mol
-    T=298
-)
-```
-
-**Direct Initialization:**
-
-```python
-A = Compound("A")
-B = Compound("B")
-
-reactants = [{"stoichiometric_coefficient": 1, "compound": A, "rate_dependency": 1}]
-products = [{"stoichiometric_coefficient": 1, "compound": B, "rate_dependency": 1}]
-
-rxn = Reaction(
-    reactants,
-    products,
-    [1.0],  # Reactant concentrations
-    [0.0],  # Product concentrations
-    K=2.0,
-    kf=0.5,
-    kb=0.25,
-    enthalpy=-50000,  # Enthalpy change (J/mol)
-    entropy=-100,     # Entropy change (J/(mol·K))
-    activation_energy_forward=50000,   # Forward activation energy (J/mol)
-    activation_energy_backward=100000, # Backward activation energy (J/mol)
-    T=298
-)
-```
-
-**Parameters:**
-
-- `reactants`: List of reactant dictionaries
-- `products`: List of product dictionaries
-- `K`: Equilibrium constant
-- `kf`: Forward rate constant
-- `kb`: Backward rate constant
-- `T`: Temperature (Kelvin)
-- `enthalpy`: Enthalpy change of reaction (J/mol, default: 0)
-- `entropy`: Entropy change of reaction (J/(mol·K), default: 0)
-- `activation_energy_forward`: Forward activation energy (J/mol, default: 0)
-- `activation_energy_backward`: Backward activation energy (J/mol, default: 0)
-
-**Temperature-Dependent Calculations:**
-
-The Reaction class automatically updates rate constants and equilibrium constants when temperature changes:
-
-```python
-# Create reaction with thermodynamic parameters
-rxn = Reaction.from_string_simple_syntax(
-    "A > B",
-    K=2.0,
-    kf=0.5,
-    kb=0.25,
-    enthalpy=-50000,  # J/mol
-    activation_energy_forward=50000,   # J/mol
-    activation_energy_backward=100000, # J/mol
-    T=298  # Initial temperature
-)
-
-# Change temperature - K, kf, and kb are automatically updated
-rxn.T = 350  # New temperature in Kelvin
-
-# The rate constants and equilibrium constant are now recalculated
-# using Arrhenius and van't Hoff equations
-print(f"K at 350K: {rxn.K}")
-print(f"kf at 350K: {rxn.kf}")
-print(f"kb at 350K: {rxn.kb}")
-```
-
-The calculations use:
-
-- **Arrhenius equation** for rate constants: `k = k₀ * exp(-Ea/R * (1/T - 1/T₀))`
-- **van't Hoff equation** for equilibrium constant: `K = K₀ * exp(-ΔH/R * (1/T - 1/T₀))`
-
-### Enviroment
-
-Manages multiple reactions and compounds in a chemical system.
-
-```python
-# Single reaction
-env = Enviroment(rxn1, T=298)
-
-# Multiple reactions
-env = Enviroment(rxn1, rxn2, rxn3, T=298)
-
-# Set concentrations
-env.concentrations = [1.0, 0.5, 0.0, 0.0]
-
-# Add reactions
-env.add(new_reaction)
-env += another_reaction
-
-# Change temperature - automatically propagates to all reactions
-env.T = 350  # All reactions update their K, kf, kb values
-```
-
-**Key Properties:**
-
-- `compounds`: List of all unique compounds
-- `reactions`: List of reactions
-- `concentrations`: Current concentrations
-- `T`: Temperature (Kelvin). Setting this property updates all reactions in the environment
-- `stoichiometric_coefficient_array`: Stoichiometric matrix
-- `rate_constants_array`: Rate constants matrix
-
-### Enviroment.kinetics()
-
-Simulates chemical reaction kinetics over time. This is the recommended API.
-
-```python
-results = env.kinetics(
-    time=10.0,
-    accuracy=1e-3,
-    checkpoint_time=[1.0, 5.0, 10.0],
-    plot=False,  # or "interactive" or "save"
-)
-```
-
-**Plotting Options:**
-
-- `plot=False`: No plotting
-- `plot="interactive"`: Interactive matplotlib plot (type 'exit' to close)
-- `plot="save"`: Save plot to file (use `directory` parameter)
-
-**Custom Colors:**
-
-```python
-colors = ['#26547c', '#ef476f', '#ffd166', '#06d6a0']
-
-results = env.kinetics(
-    time=10.0,
-    plot="save",
-    colors=colors,
-    directory="./plot.png",
-)
-```
-
-The `colors` parameter accepts:
-
-- Color name strings (e.g., `'red'`, `'blue'`, `'green'`)
-- Hex color strings (e.g., `'#26547c'`, `'#ef476f'`)
-- RGB tuples (e.g., `(0.2, 0.3, 0.5)`)
-- Must have length equal to the number of compounds
-- If `None` (default), random colors are generated
-
-### Enviroment.equilibrium()
-
-Calculates equilibrium concentrations using numerical optimization. This is the recommended API.
-
-```python
-equilibrium = env.equilibrium(
-    method="bgd",              # "bgd", "sgd", or "newton"
-    loss="log_quotient",       # "log_quotient", "quotient_error", or "log_huber"
-    max_iter=5000,
-    learning_rate=0.1,
-    tol=1e-8,
-    backtrack_beta=0.5,
-    min_concentration=1e-12,
-    quotient_error_limit=0.01,
-)
-```
-
-**Optimization Methods:**
-
-- `"bgd"`: Batch Gradient Descent (default) - processes all reactions simultaneously
-- `"sgd"`: Stochastic Gradient Descent - processes reactions in random order
-- `"newton"`: Newton's Method - uses second-order information for faster convergence
-
-**Loss Functions:**
-
-- `"log_quotient"`: Minimize `ln(Q/K)` (default)
-- `"quotient_error"`: Minimize `Q/K - 1`
-- `"log_huber"`: Huber-smoothed `ln(Q/K)` for robust convergence
-
-**Parameters:**
-
-- `max_iter`: Maximum iterations (default depends on method)
-- `learning_rate`: Step size for gradient updates (default depends on method)
-- `tol`: Convergence tolerance (default depends on method)
-- `backtrack_beta`: Backtracking line search parameter (default: 0.5)
-- `min_concentration`: Minimum concentration threshold (default: 1e-12)
-- `quotient_error_limit`: Stop when every reaction satisfies `|Q/K - 1| <= limit`. When set, `tol` is ignored. For example, `0.01` means within 1% of K per reaction.
-- `return_details`: If `True`, return an `EquilibriumResult` with compounds, reaction extents, per-reaction |Q/K - 1| errors, Q/K ratios, `stop_reason`, and `iterations`. The full result is always available via `env.last_equilibrium_result`.
-
-Use `env.apply_equilibrium(...)` to calculate equilibrium and write concentrations back to the environment in one step.
-
-Use `env.compound_labels` anytime to get ordered compound formula strings aligned with concentrations.
-Use ``env.concentrations_dict`` or ``result.concentrations_dict`` for a ``{formula: concentration}`` mapping.
-
-```python
-result = env.equilibrium(method="newton", return_details=True)
-print(result.concentrations_dict)         # {"A": 0.33, "B": 0.67}
-print(result.compounds)                   # ["A", "B"]
-print(result.reaction_quotient_error)     # per-reaction |Q/K - 1|
-print(result.max_reaction_quotient_error)
-print(result.criterion_met)                 # True if active criterion satisfied
-print(result.criterion_type)                # "quotient_error" or "residual_tol"
-print(result.criterion_value)               # measured value at final solution
-print(result.criterion_limit)               # threshold that was checked
-
-# Apply equilibrium concentrations back to the environment
-result = env.apply_equilibrium(method="newton")
-```
-
-## Examples
-
-### Example 1: Simple Reversible Reaction
+Every calculation starts with compounds, reactions, and an environment.
 
 ```python
 from ChemCompute import Compound, Reaction, Enviroment
 
-# Create reaction: A <=> B
+# Simple syntax: A <=> B
 rxn = Reaction.from_string_simple_syntax(
     "A > B",
     concentrations=[1.0, 0.0],
     K=2.0,
     kf=0.5,
-    kb=0.25
+    kb=0.25,
 )
 
-env = Enviroment(rxn, T=298)
-
-# Kinetic simulation
-results = env.kinetics(time=10.0, accuracy=0.01, plot="interactive")
+env = Enviroment(rxn, T=298)  # Kelvin
 ```
 
-### Example 2: Multiple Reactions
+Multiple reactions share compounds automatically:
 
 ```python
-# Reaction 1: A ⇌ B
 rxn1 = Reaction.from_string_simple_syntax("A > B", [1.0, 0.0], K=2.0, kf=0.5, kb=0.25)
-
-# Reaction 2: B ⇌ C
 rxn2 = Reaction.from_string_simple_syntax("B > C", [0.0, 0.0], K=1.5, kf=0.3, kb=0.2)
 
 env = Enviroment(rxn1, rxn2, T=298)
-env.concentrations = [1.0, 0.0, 0.0]
+env.concentrations = [1.0, 0.0, 0.0]  # [A, B, C]
+```
 
+Useful accessors:
+
+| Property / method | Purpose |
+|-------------------|---------|
+| `env.compounds` | Ordered list of unique species |
+| `env.concentrations` | Current molar concentrations |
+| `env.concentrations_dict` | `{formula: concentration}` mapping |
+| `env.compound_labels` | Formula strings aligned with concentration vectors |
+
+Reactions can also be built with `Reaction.from_string_complex_syntax()` or explicit reactant/product lists. See `tests/manual/manual_validation.py` for varied examples (phases, buffers, precipitation, coupled networks).
+
+---
+
+## Equilibrium calculation
+
+`env.equilibrium()` finds concentrations that satisfy all finite-K reactions simultaneously. It minimizes a loss on ln(Q/K) (or related metrics) subject to non-negative concentrations.
+
+### Basic usage
+
+```python
+# Returns a concentration list (same order as env.compounds)
+equilibrium = env.equilibrium(method="newton", tol=1e-10)
+
+# Or return full diagnostics
+result = env.equilibrium(method="newton", tol=1e-10, return_details=True)
+print(result.concentrations_dict)
+print(result.criterion_met)   # Did the solver meet its stopping criterion?
+print(result.stop_reason)     # e.g. "residual_tol", "quotient_error_limit"
+```
+
+Apply the solution back onto the environment:
+
+```python
+result = env.apply_equilibrium(method="newton", tol=1e-10)
+# env.concentrations is now updated; details in env.last_equilibrium_result
+```
+
+### Methods and stopping criteria
+
+| Parameter | Options | Role |
+|-----------|---------|------|
+| `method` | `"bgd"`, `"sgd"`, `"newton"` | Optimizer (Newton is usually best for stiff/speciation systems) |
+| `loss` | `"log_quotient"`, `"quotient_error"`, `"log_huber"` | What to minimize |
+| `tol` | float | Residual tolerance (default when `quotient_error_limit` is not set) |
+| `quotient_error_limit` | float, e.g. `0.01` | Stop when every reaction has \|Q/K − 1\| ≤ limit (overrides `tol`) |
+| `max_iter`, `learning_rate` | — | Iteration control (defaults depend on method) |
+| `min_concentration` | float | Floor used only for log safety on zero/negative values |
+
+**Diagnostics** (with `return_details=True` or via `env.last_equilibrium_result`):
+
+- `reaction_quotient_error` — per-reaction \|Q/K − 1\|
+- `reaction_quotient_ratio` — per-reaction Q/K (1.0 means equilibrium for that reaction)
+- `reaction_extents` — stoichiometric extent vector (informational)
+- `criterion_met`, `criterion_type`, `criterion_value`, `criterion_limit`
+
+### Phases, Kw, and Ksp
+
+Solid (`s`) and liquid (`l`) species are **omitted from Q** with **activity = 1**, matching standard thermodynamic practice:
+
+- Water autoionization: **Kw = [H⁺][OH⁻] = K** — H₂O does not appear in Q or K
+- Solid solubility: **Ksp = [Ca²⁺][F⁻]²** — the pure solid does not appear in Q or K
+
+Only `aq` and `g` species participate in the mass-action product Q.
+
+```python
+h2o = Compound("H2O", phase_point_list=[{"phase": "l", "temperature": 298}], excess=True)
+caf2 = Compound("CaF2", phase_point_list=[{"phase": "s", "temperature": 298}], excess=True)
+```
+
+`excess=True` keeps that species' concentration **fixed** during the solve (large reservoir of solid or solvent). It does not multiply K by the bulk molarity.
+
+### Advanced reaction options
+
+```python
+# Strong acid fully dissociated — treated as irreversible (excluded from Q/K residual)
+Reaction(..., infinite_K=True)
+
+# Direct initialization with explicit Compound objects and non-unity stoichiometry
+Reaction(reactants, products, reactants_concentration, products_concentration, K=..., kf=..., kb=...)
+```
+
+Complex reference environments (env16–env20) live in `tests/manual/complex_environments.py`. Regenerate their reference concentrations with:
+
+```bash
+python tests/manual/generate_expected.py
+```
+
+---
+
+## Kinetic simulation
+
+`env.kinetics()` integrates the mass-action rate laws forward in time using the current concentrations and rate constants `kf` / `kb`.
+
+### Basic usage
+
+```python
 results = env.kinetics(
-    time=20.0,
-    accuracy=0.01,
-    checkpoint_time=[5.0, 10.0, 15.0, 20.0],
-)
-```
-
-### Example 3: Equilibrium Calculation
-
-```python
-# A + 2B <=> C
-rxn = Reaction.from_string_simple_syntax(
-    "A + 2B > C",
-    concentrations=[1.0, 2.0, 0.0],
-    K=10.0,
-    kf=0.5,
-    kb=0.05
+    time=10.0,           # total simulation time
+    accuracy=1e-3,       # time step
+    checkpoint_time=[1.0, 5.0, 10.0],
 )
 
-env = Enviroment(rxn, T=298)
-
-equilibrium = env.equilibrium(method="newton", max_iter=100, tol=1e-10)
-
-print(f"Equilibrium concentrations: {equilibrium}")
+# results is a list of concentration snapshots at checkpoints (and final time)
+final = results[-1]
 ```
 
-### Example 4: Phase-Dependent Reactions
+### Plotting
 
 ```python
-# Create compounds with specific phases
-A_gas = Compound("A", phase_point_list=[{"phase": "g", "temperature": 298}])
-B_liquid = Compound("B", phase_point_list=[{"phase": "l", "temperature": 298}])
-C_aq = Compound("C", phase_point_list=[{"phase": "aq", "temperature": 298}])
-
-# Reaction with phase annotations
-rxn = Reaction.from_string_simple_syntax(
-    "A.g + B.l > C.aq",
-    concentrations=[1.0, 1.0, 0.0],
-    K=5.0
-)
-
-env = Enviroment(rxn, T=298)
-```
-
-### Example 5: Custom Colors for Multi-Compound Reactions
-
-This example demonstrates using custom colors to visualize multiple compounds in a complex reaction system:
-
-```python
-from ChemCompute import Reaction, Enviroment
-
-# Create multiple reactions with shared compounds
-rxn1 = Reaction.from_string_simple_syntax("g + a > 2a + g", kf=0.1, kb=0)
-rxn2 = Reaction.from_string_simple_syntax("a + b > 2b", kf=0.1, kb=0)
-rxn3 = Reaction.from_string_simple_syntax("b > d", kf=0.1, kb=0)
-
-# Create environment with all reactions
-env = Enviroment(rxn1, rxn2, rxn3)
-env.concentrations = [3, 2, 1, 0]  # [g, a, b, d]
-
-custom_colors = ['#26547c', '#ef476f', '#ffd166', '#06d6a0']
-
-results = env.kinetics(
-    time=10,
-    accuracy=1e-1,
-    plot="save",
+env.kinetics(
+    time=10.0,
+    plot="interactive",  # or "save" or False
     directory="./plot.png",
-    colors=custom_colors,
+    colors=["#26547c", "#ef476f"],  # one color per compound; optional
 )
-
-print(f"Final concentrations: {results[-1]}")
 ```
 
-The resulting plot (saved as `plot.png`) shows each compound in its specified color, making it easy to distinguish between different species in complex reaction networks.
+Kinetics uses the same `env.concentrations` as the starting point. Run equilibrium first if you want to integrate from an equilibrated state:
 
-![Kinetic Simulation Plot](src/ChemCompute/plot.png)
+```python
+env.apply_equilibrium(method="newton", tol=1e-10)
+env.kinetics(time=5.0, plot="save", directory="approach.png")
+```
+
+---
+
+## Temperature-dependent K and k
+
+Pass enthalpy, entropy, and activation energies when defining a reaction. Changing `rxn.T` or `env.T` updates **K** (van't Hoff) and **kf** / **kb** (Arrhenius):
+
+```python
+rxn = Reaction.from_string_simple_syntax(
+    "A > B",
+    K=2.0, kf=0.5, kb=0.25,
+    enthalpy=-50000,
+    activation_energy_forward=50000,
+    activation_energy_backward=100000,
+    T=298,
+)
+rxn.T = 350  # K, kf, kb recalculate automatically
+```
+
+---
 
 ## Testing
 
-Run the test suite using pytest:
-
 ```bash
 pytest tests/
+python tests/manual/manual_validation.py   # 20 named equilibrium/kinetics cases
 ```
 
-Run specific test files:
+Kinetic plots from manual validation are written to `manual_test_output/kinetics/`.
 
-```bash
-pytest tests/test_general.py
-pytest tests/test_environment_calculators.py
-```
+---
 
-Run the manual validation script (equilibrium checks + kinetic plots):
-
-```bash
-python tests/manual/manual_validation.py
-```
-
-Kinetic plots are saved under `manual_test_output/kinetics/`.
-
-## Project Structure
+## Project layout
 
 ```
-ChemCompute/
-├── src/                          # Source code directory
-│   └── ChemCompute/                 # Main package
-│       ├── __init__.py           # Package initialization (exports core classes)
-│       ├── _general.py           # Core classes: Compound, Reaction, Enviroment
-│       ├── _equilibrium.py       # Unified equilibrium solver and loss registry
-│       └── _kinetics.py          # Kinetic integration logic
-│
-├── tests/                        # Test suite
-│   ├── __init__.py               # Test package initialization
-│   ├── test_general.py           # Tests for Compound, Reaction, Enviroment
-│   ├── test_environment_calculators.py  # Tests for env.equilibrium/kinetics
-│   └── manual/
-│       └── manual_validation.py  # Manual validation (10 named environments)
-│
-├── manual_test_output/           # Generated kinetic plots from manual validation
-│   └── kinetics/
-├── docs/                         # Documentation
-│   └── index.md                  # Documentation index
-│
-├── LICENSE                       # MIT License
-├── README.md                     # This file - project documentation
-├── requirements.txt              # Python dependencies
-├── setup.py                      # Package setup configuration
-├── pyproject.toml                # Modern Python packaging configuration
-└── pytest.ini                    # Pytest configuration
+src/ChemCompute/
+  _general.py      Compound, Reaction, Enviroment
+  _equilibrium.py  Equilibrium solver and EquilibriumResult
+  _kinetics.py     Time integration and plotting
+tests/
+  test_environment_calculators.py
+  manual/          Reference environments and validation scripts
+docs/index.md      Extended documentation
 ```
 
-## Key Features in Detail
-
-### 1. Chemical Compound Representation
-
-The `Compound` class provides a flexible way to represent chemical compounds with various properties:
-
-**Basic Usage:**
-
-```python
-# Simple compound
-water = Compound("H2O")
-
-# With phase information at specific temperature
-co2 = Compound("CO2", phase_point_list=[{"phase": "g", "temperature": 298}])
-
-# With melting and boiling points
-ethanol = Compound("C2H5OH", mp=-114, bp=78)
-
-# Multiple phase points
-compound = Compound("H2O", phase_point_list=[
-    {"phase": "s", "temperature": 273},
-    {"phase": "l", "temperature": 298},
-    {"phase": "g", "temperature": 373}
-])
-```
-
-**Phase Determination:**
-The library automatically determines the phase of a compound at a given temperature using:
-
-1. Explicit phase points in `phase_point_list`
-2. Melting and boiling points (`mp` and `bp`)
-3. Priority: phase points override mp/bp logic
-
-```python
-water = Compound("H2O", mp=0, bp=100)
-print(water.phase(-5))   # "s" (solid)
-print(water.phase(50))   # "l" (liquid)
-print(water.phase(120))  # "g" (gas)
-```
-
-### 2. Unicode Formula Formatting
-
-Chemical formulas are automatically converted to Unicode with proper subscripts and superscripts for beautiful display:
-
-```python
-# Subscripts for molecular formulas
-compound = Compound("H2O")
-print(compound.unicode_formula)  # H₂O
-
-compound = Compound("CO2")
-print(compound.unicode_formula)  # CO₂
-
-# Superscripts for ions
-ion = Compound("Na+1")
-print(ion.unicode_formula)  # Na⁺¹
-
-ion = Compound("SO4-2")
-print(ion.unicode_formula)  # SO₄⁻²
-
-# Complex formulas
-complex_ion = Compound("Fe(CN)6-3")
-print(complex_ion.unicode_formula)  # Fe(CN)₆⁻³
-```
-
-**Disable Formatting:**
-
-```python
-compound = Compound("H2O", scription=False)
-print(compound.unicode_formula)  # H2O (plain text)
-```
-
-### 3. Reaction Definition and Syntax
-
-ChemCompute supports multiple ways to define chemical reactions, from simple to complex:
-
-#### Simple Syntax
-
-The simple syntax is intuitive and perfect for most use cases:
-
-**Format:** `"reactants > products"`
-
-**Features:**
-
-- `+` separator for multiple compounds
-- Prefix number for stoichiometric coefficient: `2A` means 2 moles of A
-- Suffix number for rate dependency: `A2` means rate depends on [A]²
-- Phase suffix: `.s`, `.l`, `.g`, or `.aq`
-- Simple compound names (alphabetic only)
-
-**Examples:**
-
-```python
-# Simple reversible reaction
-rxn1 = Reaction.from_string_simple_syntax("A > B")
-
-# With stoichiometry
-rxn2 = Reaction.from_string_simple_syntax("2A + B > 3C")
-
-# With phases
-rxn3 = Reaction.from_string_simple_syntax("A.g + B.l > C.aq")
-
-# With rate dependencies
-rxn4 = Reaction.from_string_simple_syntax("A2 + B1 > C1")
-
-# Combined: stoichiometry, phases, and rate dependencies
-rxn5 = Reaction.from_string_simple_syntax("2A.g2 + B.l1 > 3C.aq1")
-```
-
-#### Complex Syntax
-
-The complex syntax provides full control and supports complex compound names:
-
-**Format:** `"reactants > products"` with `&` separator
-
-**Structure:** `stoichiometric_coefficient_compound_rate_dependency`
-
-**Features:**
-
-- `&` separator for multiple compounds
-- Full control over all parameters
-- Supports complex compound names with parentheses, numbers, and charges
-- Explicit specification of stoichiometric coefficients and rate dependencies
-
-**Examples:**
-
-```python
-# Complex ions and compounds
-rxn1 = Reaction.from_string_complex_syntax(
-    "2_Fe(CN)6_-3 & Ce+2 > 2_Fe(CN)6_-4 & Ce+3"
-)
-
-# Mixed notation
-rxn2 = Reaction.from_string_complex_syntax(
-    "1_H2O_1 & 1_CO2_1 > 1_H2CO3_1"
-)
-```
-
-### 4. Phase Handling
-
-The library supports four physical phases with intelligent phase determination:
-
-**Supported Phases:**
-
-- `"s"`: Solid
-- `"l"`: Liquid
-- `"g"`: Gas
-- `"aq"`: Aqueous
-
-**Phase Specification Methods:**
-
-1. **In Reaction Strings:**
-
-   ```python
-   rxn = Reaction.from_string_simple_syntax("A.g + B.l > C.aq")
-   ```
-
-2. **Via Phase Point List:**
-
-   ```python
-   compound = Compound("H2O", phase_point_list=[
-       {"phase": "s", "temperature": 273},
-       {"phase": "l", "temperature": 298}
-   ])
-   ```
-
-3. **Using Melting/Boiling Points:**
-   ```python
-   compound = Compound("H2O", mp=0, bp=100)
-   # Automatically determines phase based on temperature
-   ```
-
-**Important Note:** In equilibrium calculations, solid and liquid phases are excluded from the mass-action law. Only gas and aqueous phases participate in equilibrium expressions, which is physically correct as pure solids and liquids have unit activity.
-
-### 5. Kinetic Simulation
-
-Use `env.kinetics()` for time-dependent concentration integration:
-
-**Key Features:**
-
-- Numerical integration of reaction kinetics
-- Configurable time step (`accuracy` parameter)
-- Automatic concentration clamping (prevents negative values)
-- Checkpoint recording at specific times
-- Interactive and static plotting
-
-**Usage:**
-
-```python
-results = env.kinetics(
-    time=10.0,
-    accuracy=1e-3,
-    checkpoint_time=[1.0, 5.0, 10.0],
-    plot="interactive",
-    colors=['red', 'blue', 'green'],
-)
-```
-
-**Plotting Options:**
-
-- `plot=False`: No plotting, just return results
-- `plot="interactive"`: Display interactive matplotlib plot (type 'exit' to close)
-- `plot="save"`: Save plot to file (specify path with `directory` parameter)
-
-**Custom Colors:**
-
-The `colors` parameter allows you to specify colors for each compound:
-
-- Accepts color names: `['red', 'blue', 'green']`
-- Hex color codes: `['#26547c', '#ef476f', '#ffd166']`
-- RGB tuples: `[(1, 0, 0), (0, 0, 1), (0, 1, 0)]`
-- Must match the number of compounds in the environment
-- If `None` (default), random colors are automatically generated
-
-### 6. Equilibrium Calculations
-
-Use `env.equilibrium()` to solve for equilibrium concentrations:
-
-**Three Optimization Methods:**
-
-1. **Batch Gradient Descent (BGD)** - Default
-2. **Stochastic Gradient Descent (SGD)**
-3. **Newton's Method**
-
-**Advanced Features:**
-
-- Pluggable loss functions (`log_quotient`, `quotient_error`, `log_huber`)
-- Optional `quotient_error_limit` stopping criterion (ignores `tol` when set)
-- Backtracking line search to ensure non-negative concentrations
-- Automatic phase exclusion (solids/liquids excluded from equilibrium)
-
-**Usage:**
-
-```python
-equilibrium = env.equilibrium(
-    method="newton",
-    loss="log_quotient",
-    max_iter=1000,
-    tol=1e-8,
-    quotient_error_limit=0.01,
-    return_details=True,
-)
-```
-
-### 7. Multi-Reaction Systems
-
-ChemCompute excels at handling complex systems with multiple reactions:
-
-**Features:**
-
-- Automatic compound aggregation across reactions
-- Shared compounds between reactions
-- Consistent concentration tracking
-- Mass conservation verification
-
-**Example:**
-
-```python
-# Reaction 1: A ⇌ B
-rxn1 = Reaction.from_string_simple_syntax("A > B", [1.0, 0.0], K=2.0)
-
-# Reaction 2: B ⇌ C (B is shared)
-rxn2 = Reaction.from_string_simple_syntax("B > C", [0.0, 0.0], K=1.5)
-
-# Create environment with both reactions
-env = Enviroment(rxn1, rxn2, T=298)
-env.concentrations = [1.0, 0.0, 0.0]  # [A, B, C]
-
-# Both kinetic and equilibrium calculations work seamlessly
-```
-
-### 8. Environment Management
-
-The `Enviroment` class provides a unified interface for managing chemical systems:
-
-**Key Capabilities:**
-
-- Automatic compound deduplication
-- Stoichiometric matrix generation
-- Rate constant arrays
-- Concentration management
-- Reaction addition and modification
-
-**Properties:**
-
-- `compounds`: List of all unique compounds
-- `reactions`: List of all reactions
-- `concentrations`: Current concentrations array
-- `stoichiometric_coefficient_array`: Matrix representation
-- `rate_constants_array`: Rate constants for all reactions
-
-**Dynamic Reaction Management:**
-
-```python
-env = Enviroment(rxn1, T=298)
-env.add(rxn2)  # Add reaction
-env += rxn3    # Or use += operator
-```
-
-### 9. Temperature-Dependent Calculations
-
-ChemCompute supports automatic temperature-dependent calculations for rate constants and equilibrium constants using fundamental thermodynamic equations.
-
-**Thermodynamic Parameters:**
-
-- **Enthalpy (ΔH)**: Enthalpy change of the reaction (J/mol)
-- **Entropy (ΔS)**: Entropy change of the reaction (J/(mol·K))
-- **Activation Energy Forward (Ea_f)**: Activation energy for forward reaction (J/mol)
-- **Activation Energy Backward (Ea_b)**: Activation energy for backward reaction (J/mol)
-
-**Automatic Updates:**
-
-When you change the temperature of a reaction or environment, the following values are automatically recalculated:
-
-1. **Rate Constants (kf, kb)**: Updated using the Arrhenius equation
-2. **Equilibrium Constant (K)**: Updated using the van't Hoff equation
-
-**Equations Used:**
-
-- **Arrhenius Equation**: `k = k₀ * exp(-Ea/R * (1/T - 1/T₀))`
-
-  - Where R = 8.3145 J/(mol·K) (gas constant)
-  - Ea is the activation energy
-  - T₀ is the reference temperature
-
-- **van't Hoff Equation**: `K = K₀ * exp(-ΔH/R * (1/T - 1/T₀))`
-  - Where ΔH is the enthalpy change
-  - T₀ is the reference temperature
-
-**Example Usage:**
-
-```python
-# Create reaction with thermodynamic parameters
-rxn = Reaction.from_string_simple_syntax(
-    "A > B",
-    K=2.0,
-    kf=0.5,
-    kb=0.25,
-    enthalpy=-50000,  # Exothermic reaction (J/mol)
-    entropy=-100,     # J/(mol·K)
-    activation_energy_forward=50000,   # J/mol
-    activation_energy_backward=100000, # J/mol
-    T=298  # Reference temperature (K)
-)
-
-print(f"At 298K: K={rxn.K:.3f}, kf={rxn.kf:.3f}, kb={rxn.kb:.3f}")
-
-# Increase temperature
-rxn.T = 350  # Automatically updates K, kf, kb
-
-print(f"At 350K: K={rxn.K:.3f}, kf={rxn.kf:.3f}, kb={rxn.kb:.3f}")
-
-# For environments, temperature change propagates to all reactions
-env = Enviroment(rxn1, rxn2, rxn3, T=298)
-env.T = 400  # All reactions update automatically
-```
-
-**Important Notes:**
-
-- If thermodynamic parameters (enthalpy, activation energies) are zero, the values remain unchanged when temperature changes
-- The calculations assume constant enthalpy and activation energy over the temperature range
-- For accurate results, use thermodynamic parameters appropriate for your temperature range
-
-## Limitations and Notes
-
-1. **Numerical Stability**: Very small or very large equilibrium constants may require careful tuning of parameters
-2. **Convergence**: Some systems may require adjustment of `max_iter`, `learning_rate`, or `tol` for convergence
-3. **Phase Exclusion**: Solid and liquid phases are excluded from equilibrium expressions (only gas and aqueous)
-4. **Mass Conservation**: The library assumes closed systems; mass conservation should be verified for your specific use case
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+---
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT — see [LICENSE](LICENSE).
 
-## Authors
+## Author
 
-- **Mohammad Keifari** - _Initial work_ - [mohammadkeifari2007@gmail.com](mailto:mohammadkeifari2007@gmail.com)
+Mohammad Keifari — [mohammadkeifari2007@gmail.com](mailto:mohammadkeifari2007@gmail.com)
