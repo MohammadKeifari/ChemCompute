@@ -1107,6 +1107,8 @@ class Enviroment():
         new_env.reactions = copy_module.deepcopy(self.reactions)
         new_env.compounds = [entry["compound"] for entry in self.compounds_concentration]
         new_env.compounds_concentration = copy_module.deepcopy(self.compounds_concentration)
+        new_env._buffer_spec = dict(getattr(self, "_buffer_spec", {}))
+        new_env._buffer_targets = dict(getattr(self, "_buffer_targets", {}))
         new_env._last_equilibrium_result = None
         for reaction in new_env.reactions:
             reaction._adjust_thermodynamics = new_env.adjust_thermodynamics

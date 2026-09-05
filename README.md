@@ -306,7 +306,43 @@ diag = env.buffer_diagnostics()  # uses current concentrations
 
 ---
 
-## Titration and Pourbaix scans
+## Titration
+
+Mix a **sample** environment with a **titrant** environment over a range of titrant volumes, equilibrate at each step, and collect concentrations vs volume added.
+
+```python
+from ChemCompute import Titration, Enviroment
+
+sample = Enviroment(...)  # analyte; set sample.volume (e.g. 0.1 L)
+titrant = Enviroment.from_compounds({"OH-": 0.1, "Na+": 0.1}, volume=1.0)
+
+curve = Titration(
+    sample,
+    titrant,
+    volume_min=0.0,
+    volume_max=0.05,
+    steps=100,
+).run(method="newton", tol=1e-10)
+
+# Access data
+curve.titrant_volumes          # L added at each step
+curve.pH
+curve.matrix()                 # shape (n_steps, n_compounds)
+curve.species("H+")            # one species vs volume
+curve.speciation               # list of {formula: c} per step
+
+# Plot
+curve.plot(species=["H+", "OH-"], plot="save", directory="titration.png")
+curve.plot_pH(plot="interactive")
+```
+
+Pass an explicit volume list with ``volumes=[0, 0.001, 0.002, ...]`` instead of ``volume_min``/``volume_max``/``steps``.
+
+The sample and titrant are not mutated. Mixing uses the same volume-weighted rules as ``envA + envB``.
+
+---
+
+## Titration and Pourbaix scans (legacy)
 
 `ParameterScan` re-solves equilibrium over a scan axis without mutating the base environment:
 
