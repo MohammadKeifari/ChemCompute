@@ -13,7 +13,7 @@ class Compound:
         bp (float | None): Boiling point of the compound.
     """
 
-    def __init__(self , formula  , phase_point_list=None , mp=None, bp=None ,scription=True):
+    def __init__(self , formula  , phase_point_list=None , mp=None, bp=None ,scription=True, excess=False):
         """
         Initialize a Compound object based on its formula, phase information, and thermal properties.
 
@@ -25,6 +25,8 @@ class Compound:
             mp (float, optional): Melting point temperature.
             bp (float, optional): Boiling point temperature.
             scription (bool, optional): If True, converts the formula into Unicode with subscripts/superscripts.
+            excess (bool, optional): If True, treat as constant activity (typically solid/liquid
+                in large excess). Concentration is fixed during equilibrium calculations.
         
         Raises:
             ValueError: If a phase in `phase_point_list` is not one of {"s", "l", "g", "aq"}.
@@ -86,6 +88,7 @@ class Compound:
                     raise ValueError("The acceptable inputs for phase are s / l / g / aq")
         self.mp = mp
         self.bp = bp
+        self.excess = excess
 
     def phase(self , temperature):
         """
@@ -172,7 +175,8 @@ class Reaction:
                  kb : float = 1,
                  activation_energy_forward : float = 0,
                  activation_energy_backward : float = 0,
-                 T : float = 298):
+                 T : float = 298,
+                 infinite_K : bool = False):
                  
         """
         Initialize a Reaction instance.
@@ -190,11 +194,14 @@ class Reaction:
             entropy (float, optional): Entropy of the reaction. Defaults to 0.
             activation_energy_forward (float, optional): Activation energy of the forward reaction. Defaults to 0.
             activation_energy_backward (float, optional): Activation energy of the backward reaction. Defaults to 0.
+            infinite_K (bool, optional): If True, treat as irreversible (K effectively infinite).
+                The reaction is driven to completion during equilibrium calculations.
         """
 
         self.K = K
         self.kf = kf
         self.kb = kb
+        self.infinite_K = infinite_K
         self.reactants = reactants
         self.products = products
         self.enthalpy = enthalpy

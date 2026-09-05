@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import math
 from typing import Optional, Union
 
 import numpy as np
@@ -10,6 +11,8 @@ METHOD_DEFAULTS = {
 }
 
 VALID_METHODS = tuple(METHOD_DEFAULTS.keys())
+INFINITE_K_VALUE = 1e300
+INFINITE_LNK = math.log(INFINITE_K_VALUE)
 
 
 def _huber_value(x: np.ndarray, delta: float) -> np.ndarray:
@@ -62,10 +65,14 @@ LOSS_REGISTRY = {
 
 @dataclass
 class EquilibriumResult:
+    """Equilibrium solve output and per-reaction diagnostics."""
+
     concentrations: list[float]
     compounds: list[str]
     reaction_extents: list[float]
+    """Stoichiometric extent x per reaction (moles advanced); informational only."""
     reaction_quotient_error: list[float]
+    """Per-reaction |Q/K - 1| (0 for infinite-K reactions). A value of 1.0 means Q/K ≈ 0 or 2."""
     max_reaction_quotient_error: float
     reaction_quotient_ratio: list[float]
     converged: bool
@@ -97,25 +104,95 @@ class EquilibriumContext:
     R: int
     C: int
     min_concentration: float
+    infinite_k_mask: np.ndarray
+    excess_source_mask: np.ndarray
+
+
+def _infinite_k_extent(ctx: EquilibriumContext, reaction_index: int, x: np.ndarray) -> float:
+    """Additional forward extent for an irreversible reaction from the current state."""
+    c = np.maximum(ctx.c0 + ctx.S @ x, 0.0)
+    lower = -np.inf
+    upper = np.inf
+    for j in range(ctx.C):
+        s = ctx.S[j, reaction_index]
+        if abs(s) < 1e-15:
+            continue
+        bound = -c[j] / s
+        if s > 0:
+            lower = max(lower, bound)
+        else:
+            upper = min(upper, bound)
+    if lower == -np.inf or lower > upper:
+        return x[reaction_index]
+    return x[reaction_index] + lower
+
+
+def _apply_infinite_k_extents(ctx: EquilibriumContext, x: np.ndarray) -> np.ndarray:
+    if not ctx.infinite_k_mask.any():
+        return x
+    for _ in range(ctx.R):
+        changed = False
+        for r in range(ctx.R):
+            if not ctx.infinite_k_mask[r]:
+                continue
+            new_value = _infinite_k_extent(ctx, r, x)
+            if not np.isclose(new_value, x[r], rtol=0.0, atol=1e-15):
+                x[r] = new_value
+                changed = True
+        if not changed:
+            break
+    return x
+
+
+def _initialize_extents(ctx: EquilibriumContext) -> np.ndarray:
+    x = np.zeros(ctx.R, dtype=float)
+    return _apply_infinite_k_extents(ctx, x)
+
+
+def _safe_concentrations(c: np.ndarray, min_concentration: float) -> np.ndarray:
+    """Use the true positive concentration for logs; floor only non-positive values."""
+    return np.where(c > 0, c, min_concentration)
 
 
 def _build_context(env, min_concentration: float) -> EquilibriumContext:
     N = env.stoichiometric_coefficient_array
-    S = N.T
+    S = N.T.copy()
     R, C = N.shape
 
     c0 = np.array(env.concentrations, dtype=float)
     A = -N.astype(float)
 
+    K_vec = np.empty(R, dtype=float)
+    for i, rxn in enumerate(env.reactions):
+        if getattr(rxn, "infinite_K", False):
+            K_vec[i] = INFINITE_K_VALUE
+        else:
+            K_vec[i] = max(rxn.K, 1e-300)
+    lnK = np.log(K_vec)
+    infinite_k_mask = np.array([getattr(rxn, "infinite_K", False) for rxn in env.reactions], dtype=bool)
+    excess_source_mask = np.zeros(R, dtype=bool)
+    for i, rxn in enumerate(env.reactions):
+        for reactant in rxn.reactants:
+            compound = reactant["compound"]
+            if getattr(compound, "excess", False):
+                excess_source_mask[i] = True
+                break
+
     for j, compound in enumerate(env.compounds):
         ph = compound.phase(env.T)
         if ph in ("s", "l"):
+            # Pure solids and liquids use activity = 1: omit from Q, leave K unchanged
+            # (e.g. Kw = [H+][OH-], Ksp = [Ca2+][F-]^2 with no H2O or CaF2 terms).
             A[:, j] = 0.0
+        if getattr(compound, "excess", False):
+            S[j, :] = 0.0
 
-    K_vec = np.array([max(rxn.K, 1e-300) for rxn in env.reactions], dtype=float)
-    lnK = np.log(K_vec)
-
-    return EquilibriumContext(N=N, S=S, A=A, c0=c0, lnK=lnK, R=R, C=C, min_concentration=min_concentration)
+    return EquilibriumContext(
+        N=N, S=S, A=A, c0=c0, lnK=lnK, R=R, C=C,
+        min_concentration=min_concentration,
+        infinite_k_mask=infinite_k_mask,
+        excess_source_mask=excess_source_mask,
+    )
 
 
 def _compute_lnQ(ctx: EquilibriumContext, c_safe: np.ndarray) -> np.ndarray:
@@ -128,11 +205,67 @@ def _compute_jacobian(ctx: EquilibriumContext, c_safe: np.ndarray, jacobian_scal
     return jacobian_scale[:, None] * J
 
 
-def _reaction_quotient_errors(ctx: EquilibriumContext, x: np.ndarray) -> np.ndarray:
-    c_safe = np.maximum(ctx.c0 + ctx.S @ x, ctx.min_concentration)
+def _reaction_quotient_errors(
+    ctx: EquilibriumContext,
+    x: np.ndarray,
+) -> np.ndarray:
+    """Per-reaction |Q/K - 1| for finite-K reactions (always computed, not masked)."""
+    c_safe = _safe_concentrations(ctx.c0 + ctx.S @ x, ctx.min_concentration)
     lnQ = _compute_lnQ(ctx, c_safe)
     q_over_k = np.exp(lnQ - ctx.lnK)
-    return np.abs(q_over_k - 1.0)
+    errors = np.abs(q_over_k - 1.0)
+    errors[ctx.infinite_k_mask] = 0.0
+    return errors
+
+
+def _finite_reaction_mask(ctx: EquilibriumContext) -> np.ndarray:
+    return ~ctx.infinite_k_mask
+
+
+def _reaction_is_negligible(
+    ctx: EquilibriumContext,
+    reaction_index: int,
+    c_safe: np.ndarray,
+    *,
+    negligible_threshold: float = 1e-8,
+) -> bool:
+    if ctx.excess_source_mask[reaction_index]:
+        return False
+    active = np.abs(ctx.A[reaction_index, :]) > 0
+    return active.any() and float(np.max(c_safe[active])) < negligible_threshold
+
+
+def _active_residual(
+    ctx: EquilibriumContext,
+    c_safe: np.ndarray,
+    loss_fn: EquilibriumLoss,
+    *,
+    negligible_threshold: float = 1e-8,
+) -> np.ndarray:
+    lnQ = _compute_lnQ(ctx, c_safe)
+    residual = loss_fn.residual(lnQ, ctx.lnK)
+    residual = residual.copy()
+    for i in range(ctx.R):
+        if ctx.infinite_k_mask[i] or _reaction_is_negligible(
+            ctx, i, c_safe, negligible_threshold=negligible_threshold
+        ):
+            residual[i] = 0.0
+    return residual
+
+
+def _active_jacobian(
+    ctx: EquilibriumContext,
+    c_safe: np.ndarray,
+    loss_fn: EquilibriumLoss,
+    residual: np.ndarray,
+) -> np.ndarray:
+    scale = loss_fn.jacobian_scale(residual)
+    J = _compute_jacobian(ctx, c_safe, scale)
+    J = J.copy()
+    for i in range(ctx.R):
+        if ctx.infinite_k_mask[i]:
+            J[i, :] = 0.0
+    return J
 
 
 def _use_residual_tolerance(quotient_error_limit: Optional[float]) -> bool:
@@ -142,16 +275,91 @@ def _use_residual_tolerance(quotient_error_limit: Optional[float]) -> bool:
 def _quotient_error_converged(
     errors: np.ndarray,
     quotient_error_limit: Optional[float],
+    infinite_k_mask: np.ndarray,
 ) -> bool:
     if quotient_error_limit is None:
         return False
-    return float(np.max(errors)) <= quotient_error_limit
+    finite_errors = errors[~infinite_k_mask] if infinite_k_mask.any() else errors
+    if finite_errors.size == 0:
+        return True
+    return float(np.max(finite_errors)) <= quotient_error_limit
 
 
 def _finalize(ctx: EquilibriumContext, x: np.ndarray):
     c_final = ctx.c0 + ctx.S @ x
     c_final = np.maximum(c_final, 0.0)
     return c_final.tolist(), x
+
+
+def _needs_warm_start(
+    ctx: EquilibriumContext,
+    x: np.ndarray,
+    loss_fn: EquilibriumLoss,
+    tol: float,
+) -> bool:
+    """True when zero-product concentrations block first-order methods."""
+    c = ctx.c0 + ctx.S @ x
+    c_safe = _safe_concentrations(c, ctx.min_concentration)
+    residual = _active_residual(ctx, c_safe, loss_fn)
+    if float(np.linalg.norm(residual, ord=2)) < max(10.0 * tol, 1e-6):
+        return False
+    zero_in_quotient = any(c[j] <= 0 and np.any(ctx.A[:, j] != 0) for j in range(ctx.C))
+    return zero_in_quotient
+
+
+def _newton_warm_start(
+    ctx: EquilibriumContext,
+    x: np.ndarray,
+    loss_fn: EquilibriumLoss,
+    *,
+    max_steps: int = 8,
+    learning_rate: float = 1.0,
+    backtrack_beta: float = 0.5,
+) -> np.ndarray:
+    """A few damped Newton steps to escape zero-product singularities."""
+    for _ in range(max_steps):
+        c = ctx.c0 + ctx.S @ x
+        c_safe = _safe_concentrations(c, ctx.min_concentration)
+        residual = _active_residual(ctx, c_safe, loss_fn)
+        residual_norm = float(np.linalg.norm(residual, ord=2))
+        if residual_norm < 1.0:
+            break
+
+        J = _active_jacobian(ctx, c_safe, loss_fn, residual)
+        try:
+            dx, *_ = np.linalg.lstsq(J, residual, rcond=None)
+        except Exception:
+            dx = np.linalg.pinv(J) @ residual
+        dx[ctx.infinite_k_mask] = 0.0
+
+        step = learning_rate
+        improved = False
+        while step >= 1e-12:
+            x_new = x - step * dx
+            x_new = _apply_infinite_k_extents(ctx, x_new)
+            c_new = ctx.c0 + ctx.S @ x_new
+            if np.all(c_new >= -1e-15):
+                c_new_safe = _safe_concentrations(c_new, ctx.min_concentration)
+                r_new = _active_residual(ctx, c_new_safe, loss_fn)
+                if float(np.linalg.norm(r_new, ord=2)) < residual_norm or step < 1e-10:
+                    x = x_new
+                    improved = True
+                    break
+            step *= backtrack_beta
+        if not improved:
+            break
+    return x
+
+
+def _prepare_first_order_extents(
+    ctx: EquilibriumContext,
+    x: np.ndarray,
+    loss_fn: EquilibriumLoss,
+    tol: float,
+) -> np.ndarray:
+    if _needs_warm_start(ctx, x, loss_fn, tol):
+        x = _newton_warm_start(ctx, x, loss_fn)
+    return x
 
 
 def _build_result(
@@ -166,14 +374,17 @@ def _build_result(
     quotient_error_limit: Optional[float],
 ) -> EquilibriumResult:
     errors = _reaction_quotient_errors(ctx, x)
-    max_error = float(np.max(errors)) if errors.size else 0.0
+    finite_errors = errors[_finite_reaction_mask(ctx)]
+    max_error = float(np.max(finite_errors)) if finite_errors.size else 0.0
 
     c = ctx.c0 + ctx.S @ x
-    c_safe = np.maximum(c, ctx.min_concentration)
-    lnQ = _compute_lnQ(ctx, c_safe)
-    residual = loss_fn.residual(lnQ, ctx.lnK)
+    c_safe = _safe_concentrations(c, ctx.min_concentration)
+    residual = _active_residual(ctx, c_safe, loss_fn)
     residual_norm = float(np.linalg.norm(residual, ord=2))
+    lnQ = _compute_lnQ(ctx, c_safe)
     q_over_k = np.exp(lnQ - ctx.lnK)
+    q_over_k = q_over_k.copy()
+    q_over_k[ctx.infinite_k_mask] = 0.0
 
     if quotient_error_limit is not None:
         criterion_type = "quotient_error"
@@ -219,18 +430,19 @@ def _run_bgd(
     backtrack_beta: float,
     quotient_error_limit: Optional[float],
 ):
-    x = np.zeros(ctx.R, dtype=float)
+    x = _initialize_extents(ctx)
+    x = _prepare_first_order_extents(ctx, x, loss_fn, tol)
     stop_reason = "max_iter"
 
     for iteration in range(max_iter):
         c = ctx.c0 + ctx.S @ x
-        c_safe = np.maximum(c, ctx.min_concentration)
+        c_safe = _safe_concentrations(c, ctx.min_concentration)
 
         lnQ = _compute_lnQ(ctx, c_safe)
-        residual = loss_fn.residual(lnQ, ctx.lnK)
+        residual = _active_residual(ctx, c_safe, loss_fn)
 
         errors = _reaction_quotient_errors(ctx, x)
-        if _quotient_error_converged(errors, quotient_error_limit):
+        if _quotient_error_converged(errors, quotient_error_limit, ctx.infinite_k_mask):
             stop_reason = "quotient_error_limit"
             break
 
@@ -238,9 +450,9 @@ def _run_bgd(
             stop_reason = "residual_tol"
             break
 
-        scale = loss_fn.jacobian_scale(residual)
-        J = _compute_jacobian(ctx, c_safe, scale)
+        J = _active_jacobian(ctx, c_safe, loss_fn, residual)
         grad = J.T @ loss_fn.grad_weights(residual)
+        grad[ctx.infinite_k_mask] = 0.0
 
         if _use_residual_tolerance(quotient_error_limit) and np.linalg.norm(grad, ord=2) < tol:
             stop_reason = "residual_tol"
@@ -250,11 +462,11 @@ def _run_bgd(
         f_curr = loss_fn.objective(residual)
         while True:
             x_new = x - step * grad
+            x_new = _apply_infinite_k_extents(ctx, x_new)
             c_new = ctx.c0 + ctx.S @ x_new
             if np.all(c_new >= -1e-15):
-                c_new_safe = np.maximum(c_new, ctx.min_concentration)
-                lnQ_new = _compute_lnQ(ctx, c_new_safe)
-                r_new = loss_fn.residual(lnQ_new, ctx.lnK)
+                c_new_safe = _safe_concentrations(c_new, ctx.min_concentration)
+                r_new = _active_residual(ctx, c_new_safe, loss_fn)
                 f_new = loss_fn.objective(r_new)
                 if f_new <= f_curr or step < 1e-12:
                     x = x_new
@@ -276,7 +488,8 @@ def _run_sgd(
     backtrack_beta: float,
     quotient_error_limit: Optional[float],
 ):
-    x = np.zeros(ctx.R, dtype=float)
+    x = _initialize_extents(ctx)
+    x = _prepare_first_order_extents(ctx, x, loss_fn, tol)
     stop_reason = "max_iter"
 
     for iteration in range(max_iter):
@@ -284,8 +497,10 @@ def _run_sgd(
         any_update = False
 
         for i in order:
+            if ctx.infinite_k_mask[i]:
+                continue
             c = ctx.c0 + ctx.S @ x
-            c_safe = np.maximum(c, ctx.min_concentration)
+            c_safe = _safe_concentrations(c, ctx.min_concentration)
             inv_c = 1.0 / c_safe
 
             lnQ_i = ctx.A[i, :] @ np.log(c_safe)
@@ -302,9 +517,10 @@ def _run_sgd(
 
             while True:
                 x_new = x - step * grad_i
+                x_new = _apply_infinite_k_extents(ctx, x_new)
                 c_new = ctx.c0 + ctx.S @ x_new
                 if np.all(c_new >= -1e-15):
-                    c_new_safe = np.maximum(c_new, ctx.min_concentration)
+                    c_new_safe = _safe_concentrations(c_new, ctx.min_concentration)
                     lnQ_i_new = ctx.A[i, :] @ np.log(c_new_safe)
                     r_i_new = loss_fn.residual(np.array([lnQ_i_new]), np.array([ctx.lnK[i]]))[0]
                     f_new = loss_fn.objective(np.array([r_i_new]))
@@ -315,14 +531,13 @@ def _run_sgd(
                 step *= backtrack_beta
 
         errors = _reaction_quotient_errors(ctx, x)
-        if _quotient_error_converged(errors, quotient_error_limit):
+        if _quotient_error_converged(errors, quotient_error_limit, ctx.infinite_k_mask):
             stop_reason = "quotient_error_limit"
             break
 
         c_full = ctx.c0 + ctx.S @ x
-        c_full_safe = np.maximum(c_full, ctx.min_concentration)
-        full_lnQ = _compute_lnQ(ctx, c_full_safe)
-        full_residual = loss_fn.residual(full_lnQ, ctx.lnK)
+        c_full_safe = _safe_concentrations(c_full, ctx.min_concentration)
+        full_residual = _active_residual(ctx, c_full_safe, loss_fn)
 
         if _use_residual_tolerance(quotient_error_limit) and np.linalg.norm(full_residual, ord=2) < tol:
             stop_reason = "residual_tol"
@@ -345,18 +560,17 @@ def _run_newton(
     backtrack_beta: float,
     quotient_error_limit: Optional[float],
 ):
-    x = np.zeros(ctx.R, dtype=float)
+    x = _initialize_extents(ctx)
     stop_reason = "max_iter"
 
     for iteration in range(max_iter):
         c = ctx.c0 + ctx.S @ x
-        c_safe = np.maximum(c, ctx.min_concentration)
+        c_safe = _safe_concentrations(c, ctx.min_concentration)
 
-        lnQ = _compute_lnQ(ctx, c_safe)
-        residual = loss_fn.residual(lnQ, ctx.lnK)
+        residual = _active_residual(ctx, c_safe, loss_fn)
 
         errors = _reaction_quotient_errors(ctx, x)
-        if _quotient_error_converged(errors, quotient_error_limit):
+        if _quotient_error_converged(errors, quotient_error_limit, ctx.infinite_k_mask):
             stop_reason = "quotient_error_limit"
             break
 
@@ -364,23 +578,23 @@ def _run_newton(
             stop_reason = "residual_tol"
             break
 
-        scale = loss_fn.jacobian_scale(residual)
-        J = _compute_jacobian(ctx, c_safe, scale)
+        J = _active_jacobian(ctx, c_safe, loss_fn, residual)
 
         try:
             dx, *_ = np.linalg.lstsq(J, residual, rcond=None)
         except Exception:
             dx = np.linalg.pinv(J) @ residual
+        dx[ctx.infinite_k_mask] = 0.0
 
         step = learning_rate
         f_curr = loss_fn.objective(residual)
         while True:
             x_new = x - step * dx
+            x_new = _apply_infinite_k_extents(ctx, x_new)
             c_new = ctx.c0 + ctx.S @ x_new
             if np.all(c_new >= -1e-15):
-                c_new_safe = np.maximum(c_new, ctx.min_concentration)
-                lnQ_new = _compute_lnQ(ctx, c_new_safe)
-                r_new = loss_fn.residual(lnQ_new, ctx.lnK)
+                c_new_safe = _safe_concentrations(c_new, ctx.min_concentration)
+                r_new = _active_residual(ctx, c_new_safe, loss_fn)
                 f_new = loss_fn.objective(r_new)
                 if f_new <= f_curr or step < 1e-12:
                     x = x_new
