@@ -1,7 +1,29 @@
+"""Tests for Enviroment: equilibrium, kinetics, composition, buffering, titration, activity, UV-Vis, bio."""
+
+import math
+import os
+
 import numpy as np
 import pytest
 
-from ChemCompute import Compound, Enviroment, EquilibriumResult, Reaction
+from ChemCompute import (
+    ActivityModel,
+    Compound,
+    Enviroment,
+    EquilibriumResult,
+    Reaction,
+    ScaledEnviroment,
+    SpectrumSpec,
+    Titration,
+    buffer_diagnostics,
+    competitive_inhibition,
+    ionic_strength,
+    mix_sample_with_titrant,
+    single_substrate_mm,
+    uvvis_spectrum,
+)
+
+from helpers import ammonia_buffer_env, aq, simple_rxn, water_env, weak_acid_env
 
 
 @pytest.fixture
@@ -524,3 +546,391 @@ def test_water_autoionization_uses_kw_not_bulk_molarity():
     water_index = 3
     assert result.reaction_quotient_ratio[water_index] == pytest.approx(1.0, rel=1e-6)
     assert result.reaction_quotient_error[water_index] == pytest.approx(0.0, abs=1e-9)
+
+
+# --- Composition ---
+
+
+class TestFromCompounds:
+    def test_compounds_only_no_reactions(self):
+        env = Enviroment.from_compounds({"Na+": 0.1, "Cl-": 0.1}, volume=1.0)
+        assert env.reactions == []
+        assert np.isclose(env.concentrations_dict["Na+"], 0.1)
+        assert np.isclose(env.concentrations_dict["Cl-"], 0.1)
+        assert env.volume == 1.0
+
+    def test_equilibrium_no_reactions(self):
+        env = Enviroment.from_compounds({"A": 0.5}, volume=1.0)
+        result = env.equilibrium(return_details=True)
+        assert result.stop_reason == "no_reactions"
+        assert result.concentrations == [0.5]
+
+
+class TestConcentrationOverride:
+    def test_override_beats_reaction_sum(self):
+        rxn = simple_rxn(initial_a=1.0, initial_b=0.0)
+        env = Enviroment(rxn, concentrations={"A": 0.25})
+        assert np.isclose(env.concentrations_dict["A"], 0.25)
+
+    def test_override_adds_new_species(self):
+        rxn = simple_rxn()
+        extra = aq("X")
+        env = Enviroment(rxn, concentrations={extra: 0.03})
+        assert "X" in env.concentrations_dict
+        assert np.isclose(env.concentrations_dict["X"], 0.03)
+
+
+class TestStandaloneReaction:
+    def test_equilibrium_matches_env_wrapper(self):
+        rxn = simple_rxn()
+        direct = rxn.equilibrium(method="newton", tol=1e-10)
+        wrapped = Enviroment(rxn).equilibrium(method="newton", tol=1e-10)
+        assert np.allclose(direct, wrapped)
+
+    def test_kinetics_runs(self):
+        rxn = Reaction.from_string_simple_syntax(
+            "A > B",
+            [1.0, 0.0],
+            K=2.0,
+            kf=0.5,
+            kb=0.25,
+        )
+        checkpoints = rxn.kinetics(time=1.0, accuracy=0.1, plot=False)
+        assert checkpoints[-1][0] < 1.0
+
+
+class TestEnvironmentMixing:
+    def test_add_equal_volumes(self):
+        envA = Enviroment.from_compounds({"A": 1.0}, volume=1.0)
+        envB = Enviroment.from_compounds({"B": 0.1}, volume=1.0)
+        envC = envA + envB
+        assert envC.volume == 2.0
+        assert np.isclose(envC.concentrations_dict["A"], 0.5)
+        assert np.isclose(envC.concentrations_dict["B"], 0.05)
+
+    def test_coefficient_mix(self):
+        envA = Enviroment.from_compounds({"A": 1.0}, volume=1.0)
+        envB = Enviroment.from_compounds({"B": 0.1}, volume=1.0)
+        envD = 0.5 * envA + 4 * envB
+        assert np.isclose(envD.volume, 4.5)
+        assert np.isclose(envD.concentrations_dict["A"], 0.5 / 4.5)
+        assert np.isclose(envD.concentrations_dict["B"], 0.4 / 4.5)
+
+    def test_combine_matches_operator(self):
+        envA = Enviroment.from_compounds({"A": 1.0}, volume=1.0)
+        envB = Enviroment.from_compounds({"B": 0.1}, volume=1.0)
+        env_op = 0.5 * envA + 4 * envB
+        env_fn = Enviroment.combine((0.5, envA), (4.0, envB))
+        assert np.isclose(env_op.volume, env_fn.volume)
+        assert env_op.concentrations_dict == env_fn.concentrations_dict
+
+    def test_add_compounds_slug(self):
+        envB = Enviroment.from_compounds({"B": 0.1}, volume=1.0)
+        envC = envB.add_compounds({"A": 1.0}, volume=1.0)
+        assert envC.volume == 2.0
+        assert np.isclose(envC.concentrations_dict["A"], 0.5)
+        assert np.isclose(envC.concentrations_dict["B"], 0.05)
+
+    def test_add_compounds_with_coefficient(self):
+        envB = Enviroment.from_compounds({"B": 0.1}, volume=1.0)
+        envE = envB.add_compounds({"A": 1.0}, volume=1.0, coefficient=4.0)
+        assert np.isclose(envE.volume, 5.0)
+
+    def test_temperature_mismatch_raises(self):
+        envA = Enviroment.from_compounds({"A": 1.0}, T=298)
+        envB = Enviroment.from_compounds({"B": 0.1}, T=310)
+        with pytest.raises(ValueError):
+            _ = envA + envB
+
+    def test_invalid_coefficient_raises(self):
+        envA = Enviroment.from_compounds({"A": 1.0})
+        with pytest.raises(ValueError):
+            _ = 0 * envA + envA
+
+    def test_scaled_type(self):
+        envA = Enviroment.from_compounds({"A": 1.0})
+        assert isinstance(0.5 * envA, ScaledEnviroment)
+
+
+# --- Buffering (enforcement) ---
+
+
+class TestConstantPHEquilibrium:
+    def test_buffered_h_plus_unchanged(self):
+        env = weak_acid_env(h_plus=1e-7, buffer=["H+"])
+        result = env.equilibrium(return_details=True)
+        assert np.isclose(result.concentrations_dict["H+"], 1e-7, rtol=1e-3)
+        assert result.concentrations_dict["HA"] < 0.1
+        assert result.concentrations_dict["A-"] > 0.0
+
+    def test_unbuffered_h_plus_shifts(self):
+        env = weak_acid_env(h_plus=1e-7, buffer=None)
+        result = env.equilibrium(return_details=True)
+        assert result.concentrations_dict["H+"] > 1e-7
+
+    def test_q_over_k_finite_with_buffered_h_plus(self):
+        env = weak_acid_env(h_plus=1e-7, buffer=["H+"])
+        result = env.equilibrium(return_details=True)
+        assert all(math.isfinite(q) for q in result.q_over_k)
+
+    def test_explicit_buffer_target(self):
+        env = weak_acid_env(h_plus=1e-7, buffer={"H+": 1e-5})
+        assert np.isclose(env.concentrations_dict["H+"], 1e-5)
+        result = env.equilibrium(return_details=True)
+        assert np.isclose(result.concentrations_dict["H+"], 1e-5, rtol=1e-3)
+
+    def test_unknown_buffered_species_raises(self):
+        env = weak_acid_env(buffer=None)
+        with pytest.raises(ValueError, match="Buffered species"):
+            env.set_buffer(["MissingIon"])
+
+
+class TestConstantPHKinetics:
+    def test_h_plus_flat_during_integration(self):
+        env = weak_acid_env(h_plus=1e-7, buffer=["H+"])
+        traces = env.kinetics(time=1.0, accuracy=0.1)
+        h_index = env.compound_labels.index("H+")
+        for snapshot in traces:
+            assert np.isclose(snapshot[h_index], 1e-7, rtol=1e-6)
+
+
+class TestBufferCombine:
+    def test_merged_h_plus_target_from_mix(self):
+        env_a = Enviroment.from_compounds(
+            {"H+": 1e-7, "Cl-": 0.1},
+            volume=1.0,
+            buffer=["H+"],
+        )
+        env_b = Enviroment.from_compounds(
+            {"H+": 1e-5, "Na+": 0.1},
+            volume=1.0,
+            buffer=["H+"],
+        )
+        combined = env_a + env_b
+        expected = (1e-7 + 1e-5) / 2.0
+        assert np.isclose(combined.buffer_targets["H+"], expected)
+        assert np.isclose(combined.concentrations_dict["H+"], expected)
+
+
+class TestSetBuffer:
+    def test_set_buffer_resnapshots_h_plus(self):
+        env = Enviroment.from_compounds({"H+": 1e-7, "Cl-": 0.1})
+        updated = env.concentrations
+        updated[env.compound_labels.index("H+")] = 1e-5
+        env.concentrations = updated
+        env.set_buffer(["H+"])
+        assert np.isclose(env.buffer_targets["H+"], 1e-5)
+
+    def test_copy_preserves_buffer_targets(self):
+        env = Enviroment.from_compounds({"H+": 1e-7, "Cl-": 0.1}, buffer=["H+"])
+        copied = env.copy()
+        assert copied.buffer_targets == env.buffer_targets
+
+
+class TestGenericBufferMechanism:
+    def test_buffered_species_fixed_in_simple_equilibrium(self):
+        a = aq("A")
+        b = aq("B")
+        rxn = Reaction(
+            reactants=[{"stoichiometric_coefficient": 1, "compound": a, "rate_dependency": 1}],
+            products=[{"stoichiometric_coefficient": 1, "compound": b, "rate_dependency": 1}],
+            reactants_concentration=[0.5],
+            products_concentration=[0.0],
+            K=2.0,
+        )
+        env = Enviroment(rxn, buffer=["A"])
+        result = env.equilibrium(return_details=True)
+        assert np.isclose(result.concentrations_dict["A"], 0.5)
+        assert result.concentrations_dict["B"] > 0.0
+
+
+# --- Titration ---
+
+
+class TestTitration:
+    def test_strong_base_titration_pH_rises(self):
+        sample = water_env(h_plus=1e-3, oh_minus=1e-11, volume=0.1)
+        titrant = Enviroment.from_compounds({"OH-": 0.1, "Na+": 0.1}, volume=1.0)
+        result = Titration(
+            sample,
+            titrant,
+            volume_min=0.0,
+            volume_max=0.02,
+            steps=20,
+        ).run(method="newton", tol=1e-8)
+
+        assert len(result.titrant_volumes) == 20
+        assert result.pH[-1] > result.pH[0]
+        assert result.matrix().shape == (20, len(result.compound_labels))
+
+    def test_matrix_rows_match_volumes(self):
+        sample = water_env(volume=0.1)
+        titrant = Enviroment.from_compounds({"OH-": 0.01, "Na+": 0.01}, volume=1.0)
+        volumes = [0.0, 0.005, 0.01]
+        result = Titration(sample, titrant, volumes=volumes).run(method="newton", tol=1e-8)
+
+        assert result.titrant_volumes == volumes
+        assert result.total_volumes[0] == sample.volume
+        assert result.total_volumes[-1] > sample.volume
+
+    def test_species_series(self):
+        sample = water_env(volume=0.1)
+        titrant = Enviroment.from_compounds({"OH-": 0.01, "Na+": 0.01}, volume=1.0)
+        result = Titration(sample, titrant, volume_min=0.0, volume_max=0.01, steps=5).run(
+            method="newton",
+            tol=1e-8,
+        )
+
+        h_series = result.species("H+")
+        assert len(h_series) == 5
+        assert np.all(np.diff(h_series) <= 0)
+
+    def test_species_unknown_raises(self):
+        sample = water_env(volume=0.1)
+        titrant = Enviroment.from_compounds({"OH-": 0.01}, volume=1.0)
+        result = Titration(sample, titrant, volume_min=0.0, volume_max=0.001, steps=3).run(
+            method="newton",
+            tol=1e-8,
+        )
+        with pytest.raises(KeyError):
+            result.species("NotASpecies")
+
+    def test_sample_not_mutated(self):
+        sample = water_env(h_plus=1e-3, volume=0.1)
+        initial = sample.concentrations_dict.copy()
+        titrant = Enviroment.from_compounds({"OH-": 0.1, "Na+": 0.1}, volume=1.0)
+        Titration(sample, titrant, volume_min=0.0, volume_max=0.01, steps=5).run(
+            method="newton",
+            tol=1e-8,
+        )
+        assert sample.concentrations_dict == initial
+        assert sample.volume == 0.1
+
+    def test_mix_zero_titrant_volume_returns_sample_copy(self):
+        sample = water_env(volume=0.1)
+        titrant = Enviroment.from_compounds({"OH-": 0.1}, volume=1.0)
+        mixed = mix_sample_with_titrant(sample, titrant, 0.0)
+        assert mixed.volume == sample.volume
+        assert mixed.concentrations_dict == sample.concentrations_dict
+        assert mixed is not sample
+
+    def test_temperature_mismatch_raises(self):
+        sample = water_env()
+        titrant = Enviroment.from_compounds({"OH-": 0.1}, T=310, volume=1.0)
+        with pytest.raises(ValueError, match="temperature"):
+            Titration(sample, titrant)
+
+    def test_plot_runs_without_display(self):
+        sample = water_env(volume=0.1)
+        titrant = Enviroment.from_compounds({"OH-": 0.01, "Na+": 0.01}, volume=1.0)
+        result = Titration(sample, titrant, volume_min=0.0, volume_max=0.01, steps=5).run(
+            method="newton",
+            tol=1e-8,
+        )
+        result.plot(species=["H+", "OH-"], plot="save", directory="titration_test_plot.png")
+        result.plot_pH(plot="save", directory="titration_test_pH.png")
+        assert os.path.isfile("titration_test_plot.png")
+        assert os.path.isfile("titration_test_pH.png")
+        os.remove("titration_test_plot.png")
+        os.remove("titration_test_pH.png")
+
+
+# --- Activity ---
+
+
+class TestActivityModel:
+    def test_davies_gamma_at_ionic_strength(self):
+        env = Enviroment.__new__(Enviroment)
+        na = aq("Na+", charge=1)
+        cl = aq("Cl-", charge=-1)
+        env.compounds = [na, cl]
+        env.charge_map = {}
+        env._T = 298
+        conc = np.array([0.1, 0.1])
+        model = ActivityModel("davies")
+        gammas = model.gamma_array(env, conc, 298)
+        assert gammas[0] < 1.0
+        assert gammas[1] < 1.0
+        assert np.isclose(gammas[0], gammas[1], rtol=0.05)
+
+    def test_ionic_strength_na_cl(self):
+        env = Enviroment.__new__(Enviroment)
+        env.compounds = [aq("Na+", charge=1), aq("Cl-", charge=-1)]
+        env.charge_map = {}
+        env._T = 298
+        i = ionic_strength(env, np.array([0.2, 0.2]), 298)
+        assert np.isclose(i, 0.2)
+
+    def test_equilibrium_with_davies_activity_model(self, simple_equilibrium_environment):
+        env = simple_equilibrium_environment
+        env.activity_model = "davies"
+        env.charge_map = {"A": 0, "B": 0}
+        result = env.equilibrium(method="newton", tol=1e-8, return_details=True)
+        assert result.criterion_met
+        assert all(c >= 0 for c in result.concentrations)
+
+
+# --- Buffer diagnostics ---
+
+
+class TestBufferDiagnostics:
+    def test_buffer_beta_positive(self):
+        env = ammonia_buffer_env()
+        result = env.equilibrium(method="newton", tol=1e-10, return_details=True)
+        diag = buffer_diagnostics(env, result.concentrations)
+        assert diag.beta > 0
+        assert not math.isnan(diag.pH)
+
+
+# --- UV-Vis ---
+
+
+class TestUVVis:
+    def test_piecewise_flat_extrapolation(self):
+        spec = SpectrumSpec(
+            points=[(400e-9, 1000.0), (500e-9, 2000.0)],
+            extrapolate="flat",
+        )
+        assert spec.epsilon(350e-9) == 1000.0
+        assert spec.epsilon(450e-9) == 1500.0
+        assert spec.epsilon(600e-9) == 2000.0
+
+    def test_extrapolate_none(self):
+        spec = SpectrumSpec(points=[(450e-9, 25000.0)], extrapolate="none")
+        assert spec.epsilon(450e-9) == 25000.0
+        assert spec.epsilon(500e-9) == 0.0
+
+    def test_beer_lambert_linear(self):
+        dye = aq("D")
+        dummy = aq("X")
+        rxn = Reaction(
+            reactants=[{"stoichiometric_coefficient": 1, "compound": dye, "rate_dependency": 1}],
+            products=[{"stoichiometric_coefficient": 1, "compound": dummy, "rate_dependency": 1}],
+            reactants_concentration=[0.001],
+            products_concentration=[0.0],
+            K=1.0,
+        )
+        env = Enviroment(rxn)
+        env.concentrations = [0.001, 0.0]
+        env.set_spectrum("D", SpectrumSpec(points=[(500e-9, 1000.0)], extrapolate="flat"))
+        a1 = uvvis_spectrum(env, wavelengths=[500e-9], path_length=0.01)[0]
+        env.concentrations = [0.002, 0.0]
+        a2 = uvvis_spectrum(env, wavelengths=[500e-9], path_length=0.01)[0]
+        assert np.isclose(a2, 2 * a1)
+
+
+# --- Bio kinetics ---
+
+
+class TestBioKinetics:
+    def test_mm_template_runs(self):
+        env = single_substrate_mm(s0=1.0, Vmax=1e-5, Km=1e-4)
+        checkpoints = env.kinetics(time=10.0, accuracy=0.1, plot=False)
+        final = checkpoints[-1]
+        assert final[0] < 1.0
+        assert final[1] > 0.0
+
+    def test_competitive_template(self):
+        env = competitive_inhibition(s0=1.0, i0=0.5, Ki=1e-4, Vmax=1e-5, Km=1e-4)
+        checkpoints = env.kinetics(time=5.0, accuracy=0.1, plot=False)
+        assert checkpoints[-1][0] < 1.0

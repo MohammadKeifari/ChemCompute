@@ -342,36 +342,6 @@ The sample and titrant are not mutated. Mixing uses the same volume-weighted rul
 
 ---
 
-## Titration and Pourbaix scans (legacy)
-
-`ParameterScan` re-solves equilibrium over a scan axis without mutating the base environment:
-
-```python
-from ChemCompute import ParameterScan, prepare_redox_couple
-
-scan = ParameterScan(
-    base_env=env,
-    axis="titrant_volume",
-    titrant={"formula": "OH-", "concentration": 0.1, "volume_steps": np.linspace(0, 0.05, 100)},
-    sample_volume=0.1,
-)
-curve = scan.run_equilibrium(method="newton", tol=1e-10)
-# curve.pH, curve.x_values (volumes), curve.equivalence_hints
-
-# Pourbaix (Eh vs pH grid)
-couples = [prepare_redox_couple(env, reaction_index=0, E0=0.44, n_electrons=2)]
-diagram = ParameterScan(
-    base_env=env,
-    axis="grid",
-    pH_range=(0, 14, 0.5),
-    Eh_range=(-0.5, 1.0, 0.05),
-    redox_couples=couples,
-).run_equilibrium(method="newton")
-# diagram.grid_dominant[pH, Eh]
-```
-
----
-
 ## UV–Vis (Beer–Lambert)
 
 User-supplied molar absorptivity points with piecewise-linear interpolation:
@@ -385,8 +355,6 @@ env.set_spectrum("InH", SpectrumSpec(
 ))
 A = uvvis_spectrum(env, wavelengths=[450e-9, 500e-9], path_length=0.01)
 ```
-
-Combine with titration scans via `ParameterScan(..., uvvis_wavelengths=[450e-9])`.
 
 ---
 
@@ -414,7 +382,7 @@ pytest tests/
 python tests/manual/manual_validation.py   # 20 named equilibrium/kinetics cases
 ```
 
-See also `tests/test_expansion_features.py` for activity, thermo, buffer, scan, UV–Vis, and bio kinetics.
+See also `tests/test_environment.py` for equilibrium, composition, buffering, titration, activity, UV–Vis, and bio kinetics.
 
 Kinetic plots from manual validation are written to `manual_test_output/kinetics/`.
 
@@ -429,15 +397,16 @@ src/ChemCompute/
   _kinetics.py     Time integration and plotting
   _activity.py     Ionic activity coefficients
   _buffer.py       Buffer capacity and Henderson-Hasselbalch
+  _buffering.py    Solver-side constant-pH / species buffering
   _mixing.py       Environment combine and ScaledEnviroment
-  _scan.py         ParameterScan (legacy titration/Pourbaix helper)
+  _titration.py    Titration curves (sample + titrant environments)
   _uvvis.py        Beer-Lambert spectra
-  _bio_kinetics.py   Michaelis-Menten and inhibition integrator
+  _bio_kinetics.py Michaelis-Menten and inhibition integrator
   bio_templates/   Premade enzyme-kinetics environments
 tests/
-  test_environment_calculators.py
-  test_environment_composition.py
-  test_expansion_features.py
+  helpers.py       Shared environment builders for tests
+  test_general.py  Compound and Reaction
+  test_environment.py  Enviroment API and features
   manual/          Reference environments and validation scripts
 docs/index.md      Extended documentation
 ```

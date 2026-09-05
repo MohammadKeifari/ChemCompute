@@ -8,7 +8,34 @@ from typing import Any, Optional, Sequence
 
 import numpy as np
 
-from ._scan import _compute_pH, _detect_equivalence_points
+
+def _find_h_plus_index(env):
+    for j, compound in enumerate(env.compounds):
+        if compound.formula == "H+":
+            return j
+    return None
+
+
+def _compute_pH(env, concentrations: np.ndarray) -> float:
+    h_index = _find_h_plus_index(env)
+    if h_index is None:
+        return float("nan")
+    h_conc = concentrations[h_index]
+    if getattr(env, "activity_model", None) is not None:
+        gammas = env.activity_model.gamma_array(env, concentrations, env.T)
+        h_conc = gammas[h_index] * h_conc
+    return -math.log10(max(h_conc, 1e-300))
+
+
+def _detect_equivalence_points(pH_values: Sequence[float]) -> list[int]:
+    """Indices of largest |dpH/dV| changes."""
+    if len(pH_values) < 3:
+        return []
+    dpH = np.abs(np.diff(pH_values))
+    if dpH.max() <= 0:
+        return []
+    threshold = 0.5 * dpH.max()
+    return [i + 1 for i, val in enumerate(dpH) if val >= threshold]
 
 
 def _titrant_slug(titrant, volume_added: float):

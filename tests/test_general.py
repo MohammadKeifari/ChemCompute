@@ -1,3 +1,5 @@
+import math
+
 import pytest
 import numpy as np
 from src.ChemCompute import Compound,Reaction,Enviroment
@@ -780,3 +782,93 @@ def test_environment_temperature_with_multiple_reactions():
     
     # Reaction 2 K should remain same (no enthalpy)
     assert rxn2.K == K2_298
+
+
+class TestVanHoffAndThermoFreeze:
+    def test_full_vant_hoff_with_entropy(self):
+        rxn = Reaction(
+            reactants=[
+                {
+                    "stoichiometric_coefficient": 1,
+                    "compound": Compound("A", phase_point_list=[{"temperature": 298, "phase": "aq"}]),
+                    "rate_dependency": 1,
+                }
+            ],
+            products=[
+                {
+                    "stoichiometric_coefficient": 1,
+                    "compound": Compound("B", phase_point_list=[{"temperature": 298, "phase": "aq"}]),
+                    "rate_dependency": 1,
+                }
+            ],
+            reactants_concentration=[1.0],
+            products_concentration=[0.0],
+            K=1.0,
+            enthalpy=5000.0,
+            entropy=20.0,
+            T=298,
+        )
+        rxn.T = 310
+        manual = 1.0 * math.exp(
+            -((5000.0 - 310.0 * 20.0) / (8.3145 * 310.0) - (5000.0 - 298.0 * 20.0) / (8.3145 * 298.0))
+        )
+        assert np.isclose(rxn.K, manual)
+
+    def test_dh_only_vant_hoff_when_entropy_zero(self):
+        rxn = Reaction(
+            reactants=[
+                {
+                    "stoichiometric_coefficient": 1,
+                    "compound": Compound("A", phase_point_list=[{"temperature": 298, "phase": "aq"}]),
+                    "rate_dependency": 1,
+                }
+            ],
+            products=[
+                {
+                    "stoichiometric_coefficient": 1,
+                    "compound": Compound("B", phase_point_list=[{"temperature": 298, "phase": "aq"}]),
+                    "rate_dependency": 1,
+                }
+            ],
+            reactants_concentration=[1.0],
+            products_concentration=[0.0],
+            K=1.0,
+            enthalpy=5000.0,
+            entropy=0.0,
+            T=298,
+        )
+        rxn.T = 310
+        manual = 1.0 * math.exp(-5000.0 / 8.3145 * (1.0 / 310.0 - 1.0 / 298.0))
+        assert np.isclose(rxn.K, manual)
+
+    def test_adjust_thermodynamics_false_freezes_k(self):
+        rxn = Reaction(
+            reactants=[
+                {
+                    "stoichiometric_coefficient": 1,
+                    "compound": Compound("A", phase_point_list=[{"temperature": 298, "phase": "aq"}]),
+                    "rate_dependency": 1,
+                }
+            ],
+            products=[
+                {
+                    "stoichiometric_coefficient": 1,
+                    "compound": Compound("B", phase_point_list=[{"temperature": 298, "phase": "aq"}]),
+                    "rate_dependency": 1,
+                }
+            ],
+            reactants_concentration=[1.0],
+            products_concentration=[0.0],
+            K=2.5,
+            kf=1.0,
+            kb=0.4,
+            enthalpy=10000.0,
+            activation_energy_forward=5000.0,
+            T=298,
+        )
+        env = Enviroment(rxn, adjust_thermodynamics=False)
+        k0, kf0, kb0 = rxn.K, rxn.kf, rxn.kb
+        env.T = 350
+        assert rxn.K == k0
+        assert rxn.kf == kf0
+        assert rxn.kb == kb0

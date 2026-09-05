@@ -1094,7 +1094,7 @@ class Enviroment():
         self.spectra[formula] = spectrum_spec
 
     def copy(self):
-        """Return a deep copy of this environment for parameter scans."""
+        """Return a deep copy of this environment for titration and other workflows."""
         import copy as copy_module
 
         new_env = Enviroment.__new__(Enviroment)
