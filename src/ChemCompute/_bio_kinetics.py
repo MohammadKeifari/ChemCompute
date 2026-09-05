@@ -149,6 +149,9 @@ def integrate_bio_kinetics(
         plt.ylabel("concentration")
 
     concentrations = env.concentrations_array.copy()
+    from ._buffering import clamp_buffered_concentrations
+
+    clamp_buffered_concentrations(concentrations, env)
     stoichiometric_coefficient = env.stoichiometric_coefficient_array
     time_interval = accuracy
 
@@ -176,6 +179,7 @@ def integrate_bio_kinetics(
         dc = net_rate_vector() * time_interval
         new_concentrations = concentrations + dc
         new_concentrations[new_concentrations < 0] = 0.0
+        clamp_buffered_concentrations(new_concentrations, env)
         if plot:
             for k in range(num_compounds):
                 plt.plot(

@@ -76,6 +76,9 @@ def integrate_kinetics(
         plt.ylabel("concentration")
 
     concentrations = env.concentrations_array.copy()
+    from ._buffering import clamp_buffered_concentrations
+
+    clamp_buffered_concentrations(concentrations, env)
     rate_dependencies = env.rate_dependency_array
     stoichiometric_coefficient = env.stoichiometric_coefficient_array
     rate_constants = env.rate_constants_array
@@ -100,6 +103,7 @@ def integrate_kinetics(
     for _ in range(int(time / accuracy + 1)):
         new_concentrations = np.add(concentrations, calculate_concentration_change())
         new_concentrations[new_concentrations < 0] = 0
+        clamp_buffered_concentrations(new_concentrations, env)
         if plot:
             for k in range(num_compounds):
                 plt.plot(

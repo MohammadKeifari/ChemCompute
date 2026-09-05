@@ -116,6 +116,27 @@ envG = envC.add_compounds({"A": 1.0}, volume=1.0, coefficient=4.0)
 
 Mixing rule: `effective_volume = coeff × volume`, total moles per species are conserved, final concentration = moles / total effective volume.
 
+### Constant pH / buffering
+
+Hold pH fixed during equilibrium or kinetics by setting `[H⁺]` and marking it as buffered. ChemCompute keeps buffered species at their initial concentration (after `concentrations=` overrides) while other species react freely. Buffered species still appear in Q/K mass-action terms.
+
+```python
+env = Enviroment(
+    weak_acid_rxn, water_autoionization,
+    concentrations={"H+": 1e-7},   # pH 7
+    buffer=["H+"],                 # hold [H+] constant during the solve
+)
+
+env.apply_equilibrium(method="newton")
+env.kinetics(time=10.0, accuracy=1e-3)  # [H+] stays 1e-7 M
+```
+
+For basic media, fix `[OH⁻]` instead: `concentrations={"OH-": 1e-2}, buffer=["OH-"]`.
+
+Explicit targets are optional: `buffer={"H+": 1e-7}`. Use `env.set_buffer(["H+"])` to re-snapshot after changing concentrations.
+
+This **enforces** constant concentration during the solve. `env.buffer_diagnostics()` only **reports** buffer capacity β(pH) after a calculation—it does not fix pH. `Compound.excess=True` fixes solids/liquids and omits them from Q; buffered H⁺ stays in Q at its fixed value.
+
 ---
 
 ## Equilibrium calculation

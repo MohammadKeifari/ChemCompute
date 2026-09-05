@@ -830,6 +830,7 @@ class Enviroment():
         activity_model=None,
         concentrations=None,
         volume=1.0,
+        buffer=None,
     ):
         """
         Initialize the environment and add one or more reactions.
@@ -844,6 +845,10 @@ class Enviroment():
             concentrations (dict, optional): Override or set species concentrations by
                 formula string or Compound key. Overrides values summed from reactions.
             volume (float, optional): Solution volume in litres. Default 1.0.
+            buffer (list, set, or dict, optional): Species held at fixed concentration during
+                equilibrium and kinetics. Use ``buffer=["H+"]`` with ``concentrations={"H+": ...}``
+                for constant pH. Dict values set explicit targets; list entries snap from current
+                concentrations after build.
 
         Raises:
             ValueError: If any reaction argument is not a Reaction object.
@@ -870,6 +875,8 @@ class Enviroment():
         self._rebuild_compound_list()
         if concentrations:
             self._apply_concentration_overrides(concentrations)
+        self._buffer_spec = self._normalize_buffer_spec(buffer)
+        self._resolve_buffer_targets()
         self._last_equilibrium_result = None
 
     @classmethod
@@ -881,12 +888,15 @@ class Enviroment():
         volume=1.0,
         adjust_thermodynamics=True,
         activity_model=None,
+        buffer=None,
     ):
         """
         Create an environment from compounds and concentrations with no reactions.
 
         Args:
             concentrations (dict): Mapping of Compound or formula str to concentration (mol/L).
+            buffer (list, set, or dict, optional): Species held at fixed concentration. See
+                :meth:`__init__` for constant-pH usage with ``buffer=["H+"]``.
         """
         from ._activity import normalize_activity_model
         from ._mixing import _resolve_compound_key
@@ -910,8 +920,83 @@ class Enviroment():
             env.compounds_concentration.append(
                 {"compound": compound, "concentration": float(concentration)}
             )
+        env._buffer_spec = env._normalize_buffer_spec(buffer)
+        env._resolve_buffer_targets()
         env._last_equilibrium_result = None
         return env
+
+    def _normalize_buffer_spec(self, buffer):
+        """Convert buffer input to {formula: explicit_target_or_None}."""
+        from ._mixing import _resolve_compound_key
+
+        if buffer is None:
+            return {}
+        if isinstance(buffer, (list, tuple, set)):
+            spec = {}
+            for key in buffer:
+                compound = _resolve_compound_key(key, self.T)
+                spec[compound.formula] = None
+            return spec
+        if isinstance(buffer, dict):
+            spec = {}
+            for key, value in buffer.items():
+                compound = _resolve_compound_key(key, self.T)
+                spec[compound.formula] = float(value) if value is not None else None
+            return spec
+        raise TypeError(
+            "buffer must be a list, set, tuple, or dict of species keys, or None."
+        )
+
+    def _resolve_buffer_targets(self):
+        """Resolve fixed concentrations for buffered species from spec and current state."""
+        from ._mixing import _resolve_compound_key
+
+        targets = {}
+        for formula, explicit in self._buffer_spec.items():
+            if formula in self.compound_labels:
+                index = self.compound_labels.index(formula)
+                if explicit is not None:
+                    targets[formula] = explicit
+                    self.compounds_concentration[index]["concentration"] = explicit
+                else:
+                    targets[formula] = self.concentrations[index]
+            elif explicit is not None:
+                compound = _resolve_compound_key(formula, self.T)
+                self.compounds.append(compound)
+                self.compounds_concentration.append(
+                    {"compound": compound, "concentration": explicit}
+                )
+                targets[formula] = explicit
+            else:
+                raise ValueError(
+                    f"Buffered species {formula!r} is not in the environment; "
+                    "provide an explicit concentration in buffer={{...}}."
+                )
+        self._buffer_targets = targets
+
+    def set_buffer(self, buffer):
+        """
+        Replace buffered species and re-resolve fixed concentrations.
+
+        For constant pH, set ``[H+]`` first (via ``concentrations=`` or direct edit),
+        then call ``set_buffer(["H+"])`` to snapshot the current value.
+
+        Args:
+            buffer: Same forms as the ``buffer`` parameter on :meth:`__init__`.
+        """
+        self._buffer_spec = self._normalize_buffer_spec(buffer)
+        self._resolve_buffer_targets()
+
+    @property
+    def buffer_targets(self) -> dict[str, float]:
+        """Fixed concentrations for buffered species (formula -> mol/L)."""
+        return dict(getattr(self, "_buffer_targets", {}))
+
+    @property
+    def buffer_indices(self):
+        """Compound indices aligned with :attr:`compounds` for buffered species."""
+        labels = self.compound_labels
+        return [labels.index(formula) for formula in self._buffer_targets]
 
     def _apply_concentration_overrides(self, concentrations):
         """Apply concentration dict; overrides reaction-derived values."""

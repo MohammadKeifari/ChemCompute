@@ -198,6 +198,9 @@ def _build_context(env, min_concentration: float) -> EquilibriumContext:
         if getattr(compound, "excess", False):
             S[j, :] = 0.0
 
+    for j in getattr(env, "buffer_indices", []):
+        S[j, :] = 0.0
+
     ctx = EquilibriumContext(
         N=N, S=S, A=A, c0=c0, lnK=lnK, R=R, C=C,
         min_concentration=min_concentration,

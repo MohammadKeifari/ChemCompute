@@ -129,6 +129,11 @@ def combine_environments(*terms):
             }
         )
 
+    from ._buffering import merge_buffer_specs
+
+    combined._buffer_spec = merge_buffer_specs(*(env for _, env in normalized))
+    combined._resolve_buffer_targets()
+
     for reaction in combined.reactions:
         reaction._adjust_thermodynamics = adjust_thermodynamics
         reaction.T = T
