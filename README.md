@@ -71,6 +71,53 @@ Reactions can also be built with `Reaction.from_string_complex_syntax()` or expl
 
 ---
 
+## Environment construction and mixing
+
+### Three ways to build an environment
+
+```python
+# 1) Classic — reactions only (concentrations summed from reactions)
+env = Enviroment(rxn1, rxn2, T=298, volume=1.0)
+
+# 2) Compounds only — no reaction network
+env = Enviroment.from_compounds({"Na+": 0.1, "Cl-": 0.1}, volume=1.0)
+
+# 3) Reactions + concentration overrides (dict wins over reaction values)
+env = Enviroment(
+    rxn1, rxn2,
+    concentrations={"H+": 0.06, "Ca+2": 0.01},
+    volume=0.1,
+)
+```
+
+`volume` is in litres (default `1.0`) and is used when mixing environments.
+
+### Standalone reaction solvers
+
+```python
+rxn = Reaction.from_string_simple_syntax("A > B", [1.0, 0.0], K=2.0, kf=0.5, kb=0.25)
+final = rxn.equilibrium(method="newton", tol=1e-10)
+traces = rxn.kinetics(time=5.0, accuracy=1e-3)
+```
+
+### Mix environments (volume-weighted)
+
+```python
+envA = Enviroment(rxn_a, concentrations={"A": 1.0}, volume=1.0)
+envB = Enviroment.from_compounds({"B": 0.1}, volume=1.0)
+
+envC = envA + envB                         # volume = 2.0
+envD = 0.5 * envA + 4 * envB               # effective volume = 4.5 L
+envE = Enviroment.combine((0.5, envA), (4, envB))  # same as envD
+
+envF = envC.add_compounds({"A": 1.0}, volume=1.0)
+envG = envC.add_compounds({"A": 1.0}, volume=1.0, coefficient=4.0)
+```
+
+Mixing rule: `effective_volume = coeff × volume`, total moles per species are conserved, final concentration = moles / total effective volume.
+
+---
+
 ## Equilibrium calculation
 
 `env.equilibrium()` finds concentrations that satisfy all finite-K reactions simultaneously. It minimizes a loss on ln(Q/K) (or related metrics) subject to non-negative concentrations.
@@ -200,6 +247,107 @@ rxn = Reaction.from_string_simple_syntax(
 rxn.T = 350  # K, kf, kb recalculate automatically
 ```
 
+When `entropy` is set, full van't Hoff uses ΔG = ΔH − TΔS. Disable automatic updates:
+
+```python
+env = Enviroment(rxn, adjust_thermodynamics=False)
+env.T = 350  # K, kf, kb unchanged
+```
+
+---
+
+## Ionic activity model
+
+Correct Q/K at non-negligible ionic strength with Debye–Hückel, Davies, or Pitzer-lite:
+
+```python
+from ChemCompute import ActivityModel
+
+env = Enviroment(rxn, activity_model="davies")
+env.charge_map = {"Ca2+": 2, "F-": -1}  # overrides Compound.charge
+# or: Compound("Na+", charge=1, ...)
+```
+
+Activity coefficients are applied in `equilibrium()` when computing Q.
+
+---
+
+## Buffer diagnostics
+
+After equilibrium, compute buffer capacity β(pH) and Henderson–Hasselbalch checks:
+
+```python
+from ChemCompute import buffer_diagnostics
+
+diag = env.buffer_diagnostics()  # uses current concentrations
+# diag.pH, diag.beta, diag.buffer_pairs, diag.hh_predictions
+```
+
+---
+
+## Titration and Pourbaix scans
+
+`ParameterScan` re-solves equilibrium over a scan axis without mutating the base environment:
+
+```python
+from ChemCompute import ParameterScan, prepare_redox_couple
+
+scan = ParameterScan(
+    base_env=env,
+    axis="titrant_volume",
+    titrant={"formula": "OH-", "concentration": 0.1, "volume_steps": np.linspace(0, 0.05, 100)},
+    sample_volume=0.1,
+)
+curve = scan.run_equilibrium(method="newton", tol=1e-10)
+# curve.pH, curve.x_values (volumes), curve.equivalence_hints
+
+# Pourbaix (Eh vs pH grid)
+couples = [prepare_redox_couple(env, reaction_index=0, E0=0.44, n_electrons=2)]
+diagram = ParameterScan(
+    base_env=env,
+    axis="grid",
+    pH_range=(0, 14, 0.5),
+    Eh_range=(-0.5, 1.0, 0.05),
+    redox_couples=couples,
+).run_equilibrium(method="newton")
+# diagram.grid_dominant[pH, Eh]
+```
+
+---
+
+## UV–Vis (Beer–Lambert)
+
+User-supplied molar absorptivity points with piecewise-linear interpolation:
+
+```python
+from ChemCompute import SpectrumSpec, uvvis_spectrum
+
+env.set_spectrum("InH", SpectrumSpec(
+    points=[(400e-9, 12000), (450e-9, 25000), (500e-9, 8000)],
+    extrapolate="flat",  # or "none" for zero epsilon off-tabulated wavelengths
+))
+A = uvvis_spectrum(env, wavelengths=[450e-9, 500e-9], path_length=0.01)
+```
+
+Combine with titration scans via `ParameterScan(..., uvvis_wavelengths=[450e-9])`.
+
+---
+
+## Enzyme kinetics
+
+Michaelis–Menten and inhibition models integrate via `env.kinetics()` when bio rate laws are present:
+
+```python
+from ChemCompute import single_substrate_mm, competitive_inhibition
+
+env = single_substrate_mm(s0=1.0, Vmax=1e-5, Km=1e-4)
+checkpoints = env.kinetics(time=100.0, accuracy=0.01)
+
+env = competitive_inhibition(s0=1.0, i0=0.2, Ki=1e-4)
+```
+
+Templates: `single_substrate_mm`, `competitive_inhibition`, `uncompetitive_inhibition`, `noncompetitive_inhibition`, `mixed_inhibition`, `sequential_pathway`.
+
 ---
 
 ## Testing
@@ -208,6 +356,8 @@ rxn.T = 350  # K, kf, kb recalculate automatically
 pytest tests/
 python tests/manual/manual_validation.py   # 20 named equilibrium/kinetics cases
 ```
+
+See also `tests/test_expansion_features.py` for activity, thermo, buffer, scan, UV–Vis, and bio kinetics.
 
 Kinetic plots from manual validation are written to `manual_test_output/kinetics/`.
 
@@ -220,8 +370,17 @@ src/ChemCompute/
   _general.py      Compound, Reaction, Enviroment
   _equilibrium.py  Equilibrium solver and EquilibriumResult
   _kinetics.py     Time integration and plotting
+  _activity.py     Ionic activity coefficients
+  _buffer.py       Buffer capacity and Henderson-Hasselbalch
+  _mixing.py       Environment combine and ScaledEnviroment
+  _scan.py         ParameterScan (legacy titration/Pourbaix helper)
+  _uvvis.py        Beer-Lambert spectra
+  _bio_kinetics.py   Michaelis-Menten and inhibition integrator
+  bio_templates/   Premade enzyme-kinetics environments
 tests/
   test_environment_calculators.py
+  test_environment_composition.py
+  test_expansion_features.py
   manual/          Reference environments and validation scripts
 docs/index.md      Extended documentation
 ```

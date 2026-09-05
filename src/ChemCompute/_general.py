@@ -13,7 +13,7 @@ class Compound:
         bp (float | None): Boiling point of the compound.
     """
 
-    def __init__(self , formula  , phase_point_list=None , mp=None, bp=None ,scription=True, excess=False):
+    def __init__(self , formula  , phase_point_list=None , mp=None, bp=None ,scription=True, excess=False, charge=0):
         """
         Initialize a Compound object based on its formula, phase information, and thermal properties.
 
@@ -27,6 +27,7 @@ class Compound:
             scription (bool, optional): If True, converts the formula into Unicode with subscripts/superscripts.
             excess (bool, optional): If True, treat as constant activity (typically solid/liquid
                 in large excess). Concentration is fixed during equilibrium calculations.
+            charge (int, optional): Ionic charge for activity-coefficient calculations. Default 0.
         
         Raises:
             ValueError: If a phase in `phase_point_list` is not one of {"s", "l", "g", "aq"}.
@@ -89,6 +90,7 @@ class Compound:
         self.mp = mp
         self.bp = bp
         self.excess = excess
+        self.charge = int(charge)
 
     def phase(self , temperature):
         """
@@ -127,7 +129,10 @@ class Compound:
         return self.unicode_formula
     def __eq__(self, value):
         """Compare compounds based on their Unicode formulas."""
-        return self.unicode_formula == value.unicode_formula 
+        return self.unicode_formula == value.unicode_formula
+
+    def __hash__(self):
+        return hash(self.formula)
         
 class Reaction:
     """
@@ -209,6 +214,11 @@ class Reaction:
         self.activation_energy_forward = activation_energy_forward
         self.activation_energy_backward = activation_energy_backward
         self._T = T
+        self._K_ref = K
+        self._T_ref = T
+        self._adjust_thermodynamics = True
+        self.rate_law = "mass_action"
+        self.bio_params = {}
         self.compounds = []
         
         counter = 0 
@@ -565,12 +575,21 @@ class Reaction:
             If these are zero, the rate constants and equilibrium constant
             will remain unchanged.
         """
+        if not getattr(self, "_adjust_thermodynamics", True):
+            self._T = value
+            return
         new_kf = self.kf * math.exp((-self.activation_energy_forward/8.3145) * (1/value - 1/self._T))
         new_kb = self.kb * math.exp((-self.activation_energy_backward/8.3145) * (1/value - 1/self._T))
         self.kf = new_kf
         self.kb = new_kb
-        new_K = self.K * math.exp((-self.enthalpy/8.3145) * (1/value - 1/self._T))
-        self.K = new_K
+        delta_g_ref = self.enthalpy - self._T * self.entropy
+        delta_g_new = self.enthalpy - value * self.entropy
+        if self.entropy != 0:
+            self.K = self._K_ref * math.exp(
+                -(delta_g_new / (8.3145 * value) - delta_g_ref / (8.3145 * self._T_ref))
+            )
+        else:
+            self.K = self.K * math.exp((-self.enthalpy/8.3145) * (1/value - 1/self._T))
         self._T = value
     
     def __str__(self):
@@ -703,6 +722,71 @@ class Reaction:
         """
         for compound in self.compounds:
             yield compound
+
+    def equilibrium(
+        self,
+        *,
+        method: str = "bgd",
+        loss: str = "log_quotient",
+        max_iter=None,
+        learning_rate=None,
+        tol=None,
+        backtrack_beta: float = 0.5,
+        min_concentration: float = 1e-12,
+        quotient_error_limit=None,
+        huber_delta: float = 1.0,
+        return_details: bool = False,
+    ):
+        """
+        Calculate equilibrium for this single reaction without manually building an Enviroment.
+        """
+        env = Enviroment(
+            self,
+            T=self.T,
+            volume=1.0,
+            adjust_thermodynamics=getattr(self, "_adjust_thermodynamics", True),
+        )
+        result = env.equilibrium(
+            method=method,
+            loss=loss,
+            max_iter=max_iter,
+            learning_rate=learning_rate,
+            tol=tol,
+            backtrack_beta=backtrack_beta,
+            min_concentration=min_concentration,
+            quotient_error_limit=quotient_error_limit,
+            huber_delta=huber_delta,
+            return_details=True,
+        )
+        self._last_equilibrium_result = result
+        if return_details:
+            return result
+        return result.concentrations
+
+    def kinetics(
+        self,
+        time,
+        checkpoint_time=None,
+        plot=False,
+        directory="./plot.png",
+        colors=None,
+        *,
+        accuracy: float = 1e-3,
+    ):
+        """Integrate kinetics for this single reaction without manually building an Enviroment."""
+        env = Enviroment(self, T=self.T, volume=1.0)
+        return env.kinetics(
+            time,
+            checkpoint_time=checkpoint_time,
+            plot=plot,
+            directory=directory,
+            colors=colors,
+            accuracy=accuracy,
+        )
+
+    @property
+    def last_equilibrium_result(self):
+        return getattr(self, "_last_equilibrium_result", None)
     
 class Enviroment():
     """
@@ -738,36 +822,149 @@ class Enviroment():
         else:
             raise ValueError("Only Reaction objects can be added to Enviroment.")
         
-    def __init__(self , *reactions , T=298):
+    def __init__(
+        self,
+        *reactions,
+        T=298,
+        adjust_thermodynamics=True,
+        activity_model=None,
+        concentrations=None,
+        volume=1.0,
+    ):
         """
         Initialize the environment and add one or more reactions.
 
         Args:
             *reactions (Reaction): Variable number of Reaction objects.
             T (float, optional): Temperature of the environment (K). Default is 298 K.
+            adjust_thermodynamics (bool, optional): If True, update K/kf/kb when T changes.
+                If False, K/kf/kb remain constant (default True).
+            activity_model (str, ActivityModel, bool, or None): Ionic activity model for
+                equilibrium Q. None disables activity corrections.
+            concentrations (dict, optional): Override or set species concentrations by
+                formula string or Compound key. Overrides values summed from reactions.
+            volume (float, optional): Solution volume in litres. Default 1.0.
 
         Raises:
-            ValueError: If any argument is not a Reaction object.
+            ValueError: If any reaction argument is not a Reaction object.
         """
+        from ._activity import normalize_activity_model
+
+        if volume <= 0:
+            raise ValueError("Environment volume must be positive.")
+
         self.reactions = []
-        for reaction in reactions :
+        self.adjust_thermodynamics = adjust_thermodynamics
+        self.charge_map = {}
+        self.spectra = {}
+        self._activity_model = normalize_activity_model(activity_model)
+        self.volume = float(volume)
+        for reaction in reactions:
             if self._check_if_reaction(reaction):
+                reaction._adjust_thermodynamics = adjust_thermodynamics
                 reaction.T = T
                 self.reactions.append(reaction)
         self._T = T
         self.compounds = []
         self.compounds_concentration = []
-        for reaction in reactions:
-            for compound in reaction.compounds:
-                compounds = [i["compound"] for i in self.compounds_concentration]
-                if compound["compound"] in compounds:
-                    index_in_compounds_concentration = compounds.index(compound["compound"])
-                    index_in_reaction = reaction.compounds.index(compound)
-                    self.compounds_concentration[index_in_compounds_concentration]["concentration"] += reaction.compounds[index_in_reaction]["concentration"]
-                else:
-                    index_in_reaction = reaction.compounds.index(compound)
-                    self.compounds_concentration.append({"compound" : compound["compound"] , "concentration" :reaction.compounds[index_in_reaction]["concentration"]})
-                    self.compounds.append(compound["compound"])
+        self._rebuild_compound_list()
+        if concentrations:
+            self._apply_concentration_overrides(concentrations)
+        self._last_equilibrium_result = None
+
+    @classmethod
+    def from_compounds(
+        cls,
+        concentrations,
+        *,
+        T=298,
+        volume=1.0,
+        adjust_thermodynamics=True,
+        activity_model=None,
+    ):
+        """
+        Create an environment from compounds and concentrations with no reactions.
+
+        Args:
+            concentrations (dict): Mapping of Compound or formula str to concentration (mol/L).
+        """
+        from ._activity import normalize_activity_model
+        from ._mixing import _resolve_compound_key
+
+        if volume <= 0:
+            raise ValueError("Environment volume must be positive.")
+
+        env = cls.__new__(cls)
+        env.reactions = []
+        env.adjust_thermodynamics = adjust_thermodynamics
+        env.charge_map = {}
+        env.spectra = {}
+        env._activity_model = normalize_activity_model(activity_model)
+        env._T = T
+        env.volume = float(volume)
+        env.compounds = []
+        env.compounds_concentration = []
+        for key, concentration in concentrations.items():
+            compound = _resolve_compound_key(key, T)
+            env.compounds.append(compound)
+            env.compounds_concentration.append(
+                {"compound": compound, "concentration": float(concentration)}
+            )
+        env._last_equilibrium_result = None
+        return env
+
+    def _apply_concentration_overrides(self, concentrations):
+        """Apply concentration dict; overrides reaction-derived values."""
+        from ._mixing import _resolve_compound_key
+
+        for key, value in concentrations.items():
+            compound = _resolve_compound_key(key, self.T)
+            formula = compound.formula
+            if formula in self.compound_labels:
+                index = self.compound_labels.index(formula)
+                self.compounds_concentration[index]["concentration"] = float(value)
+            else:
+                self.compounds.append(compound)
+                self.compounds_concentration.append(
+                    {"compound": compound, "concentration": float(value)}
+                )
+
+    @classmethod
+    def combine(cls, *terms):
+        """Combine environments with optional (coefficient, env) terms."""
+        from ._mixing import combine_environments
+
+        return combine_environments(*terms)
+
+    def add_compounds(self, concentrations, *, volume=1.0, coefficient=1.0):
+        """Return a new environment with an added concentration slug mixed in."""
+        from ._mixing import add_compounds_to_environment
+
+        return add_compounds_to_environment(
+            self,
+            concentrations,
+            volume=volume,
+            coefficient=coefficient,
+        )
+
+    def __add__(self, other):
+        from ._mixing import ScaledEnviroment
+
+        if isinstance(other, ScaledEnviroment):
+            return self.combine((1.0, self), other)
+        if isinstance(other, Enviroment):
+            return self.combine((1.0, self), (1.0, other))
+        return NotImplemented
+
+    def __mul__(self, coefficient):
+        from ._mixing import ScaledEnviroment
+
+        return ScaledEnviroment(coefficient, self)
+
+    def __rmul__(self, coefficient):
+        from ._mixing import ScaledEnviroment
+
+        return ScaledEnviroment(coefficient, self)
     @property
     def T(self):
         """
@@ -793,8 +990,49 @@ class Enviroment():
         """
         self._T = value
         for reaction in self.reactions:
+            reaction._adjust_thermodynamics = self.adjust_thermodynamics
             reaction.T = value
-            
+
+    @property
+    def activity_model(self):
+        """Current ActivityModel instance, or None for ideal solution."""
+        return self._activity_model
+
+    @activity_model.setter
+    def activity_model(self, value):
+        from ._activity import normalize_activity_model
+
+        self._activity_model = normalize_activity_model(value)
+
+    def set_spectrum(self, formula: str, spectrum_spec):
+        """Attach a SpectrumSpec to a compound by formula label."""
+        self.spectra[formula] = spectrum_spec
+
+    def copy(self):
+        """Return a deep copy of this environment for parameter scans."""
+        import copy as copy_module
+
+        new_env = Enviroment.__new__(Enviroment)
+        new_env.adjust_thermodynamics = self.adjust_thermodynamics
+        new_env.charge_map = dict(self.charge_map)
+        new_env.spectra = dict(self.spectra)
+        new_env._activity_model = self._activity_model
+        new_env._T = self._T
+        new_env.volume = self.volume
+        new_env.reactions = copy_module.deepcopy(self.reactions)
+        new_env.compounds = [entry["compound"] for entry in self.compounds_concentration]
+        new_env.compounds_concentration = copy_module.deepcopy(self.compounds_concentration)
+        new_env._last_equilibrium_result = None
+        for reaction in new_env.reactions:
+            reaction._adjust_thermodynamics = new_env.adjust_thermodynamics
+        return new_env
+
+    def buffer_diagnostics(self, equilibrium_concentrations=None):
+        """Compute buffer capacity and Henderson-Hasselbalch diagnostics."""
+        from ._buffer import buffer_diagnostics
+
+        return buffer_diagnostics(self, equilibrium_concentrations)
+
     def __iadd__(self , reaction):
         """
         Add a reaction to the environment using the += operator.
@@ -809,21 +1047,10 @@ class Enviroment():
             ValueError: If `reaction` is not a valid Reaction object.
         """
         if self._check_if_reaction(reaction):
+            reaction._adjust_thermodynamics = self.adjust_thermodynamics
             reaction.T = self.T
             self.reactions.append(reaction)
-            self.compounds = []
-            self.compounds_concentration = []
-            for reaction in self.reactions:
-                for compound in reaction.compounds:
-                    compounds = [i["compound"] for i in self.compounds_concentration]
-                    if compound["compound"] in compounds:
-                        index_in_compounds_concentration = compounds.index(compound["compound"])
-                        index_in_reaction = reaction.compounds.index(compound)
-                        self.compounds_concentration[index_in_compounds_concentration]["concentration"] += reaction.compounds[index_in_reaction]["concentration"]
-                    else:
-                        index_in_reaction = reaction.compounds.index(compound)
-                        self.compounds_concentration.append({"compound" : compound["compound"] , "concentration" :reaction.compounds[index_in_reaction]["concentration"]})
-                        self.compounds.append(compound["compound"])
+            self._rebuild_compound_list()
             return self
     def __iter__(self):
         """
@@ -845,20 +1072,31 @@ class Enviroment():
             ValueError: If `reaction` is not a valid Reaction object.
         """
         if self._check_if_reaction(reaction):
+            reaction._adjust_thermodynamics = self.adjust_thermodynamics
             self.reactions.append(reaction)
-            self.compounds = []
-            self.compounds_concentration = []
-            for reaction in self.reactions:
-                for compound in reaction.compounds:
-                    compounds = [i["compound"] for i in self.compounds_concentration]
-                    if compound["compound"] in compounds:
-                        index_in_compounds_concentration = compounds.index(compound["compound"])
-                        index_in_reaction = reaction.compounds.index(compound)
-                        self.compounds_concentration[index_in_compounds_concentration]["concentration"] += reaction.compounds[index_in_reaction]["concentration"]
-                    else:
-                        index_in_reaction = reaction.compounds.index(compound)
-                        self.compounds_concentration.append({"compound" : compound["compound"] , "concentration" :reaction.compounds[index_in_reaction]["concentration"]})
-                        self.compounds.append(compound["compound"])
+            self._rebuild_compound_list()
+
+    def _rebuild_compound_list(self):
+        """Rebuild aggregated compound list from all reactions."""
+        self.compounds = []
+        self.compounds_concentration = []
+        for reaction in self.reactions:
+            for compound in reaction.compounds:
+                compounds = [i["compound"] for i in self.compounds_concentration]
+                if compound["compound"] in compounds:
+                    index_in_compounds_concentration = compounds.index(compound["compound"])
+                    index_in_reaction = reaction.compounds.index(compound)
+                    self.compounds_concentration[index_in_compounds_concentration]["concentration"] += reaction.compounds[index_in_reaction]["concentration"]
+                else:
+                    index_in_reaction = reaction.compounds.index(compound)
+                    self.compounds_concentration.append(
+                        {
+                            "compound": compound["compound"],
+                            "concentration": reaction.compounds[index_in_reaction]["concentration"],
+                        }
+                    )
+                    self.compounds.append(compound["compound"])
+
     @property
     def reaction_by_index(self):
         """
@@ -1208,7 +1446,28 @@ class Enviroment():
             Equilibrium concentrations aligned with ``self.compounds``, or a full
             result object when ``return_details=True``.
         """
-        from ._equilibrium import solve_equilibrium
+        from ._equilibrium import solve_equilibrium, EquilibriumResult
+
+        if len(self.reactions) == 0:
+            result = EquilibriumResult(
+                concentrations=list(self.concentrations),
+                compounds=list(self.compound_labels),
+                reaction_extents=[],
+                reaction_quotient_error=[],
+                max_reaction_quotient_error=0.0,
+                reaction_quotient_ratio=[],
+                converged=True,
+                stop_reason="no_reactions",
+                iterations=0,
+                criterion_met=True,
+                criterion_type="no_reactions",
+                criterion_value=0.0,
+                criterion_limit=0.0,
+            )
+            self._last_equilibrium_result = result
+            if return_details:
+                return result
+            return result.concentrations
 
         result = solve_equilibrium(
             self,
@@ -1318,11 +1577,13 @@ class Enviroment():
             Checkpoint concentration snapshots.
         """
         from ._kinetics import integrate_kinetics
+        from ._bio_kinetics import integrate_bio_kinetics, uses_bio_kinetics
 
         if checkpoint_time is None:
             checkpoint_time = []
 
-        return integrate_kinetics(
+        integrator = integrate_bio_kinetics if uses_bio_kinetics(self) else integrate_kinetics
+        return integrator(
             self,
             time=time,
             accuracy=accuracy,

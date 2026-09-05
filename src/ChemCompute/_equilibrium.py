@@ -106,6 +106,17 @@ class EquilibriumContext:
     min_concentration: float
     infinite_k_mask: np.ndarray
     excess_source_mask: np.ndarray
+    env: object = None
+    ln_gamma: np.ndarray = None
+
+
+def _update_activity(ctx: EquilibriumContext, c: np.ndarray) -> None:
+    """Refresh ln(gamma) from current concentrations when activity model is active."""
+    if ctx.env is None or getattr(ctx.env, "activity_model", None) is None:
+        ctx.ln_gamma = np.zeros(ctx.C, dtype=float)
+        return
+    gammas = ctx.env.activity_model.gamma_array(ctx.env, np.maximum(c, 0.0), ctx.env.T)
+    ctx.ln_gamma = np.log(np.maximum(gammas, 1e-30))
 
 
 def _infinite_k_extent(ctx: EquilibriumContext, reaction_index: int, x: np.ndarray) -> float:
@@ -187,16 +198,24 @@ def _build_context(env, min_concentration: float) -> EquilibriumContext:
         if getattr(compound, "excess", False):
             S[j, :] = 0.0
 
-    return EquilibriumContext(
+    ctx = EquilibriumContext(
         N=N, S=S, A=A, c0=c0, lnK=lnK, R=R, C=C,
         min_concentration=min_concentration,
         infinite_k_mask=infinite_k_mask,
         excess_source_mask=excess_source_mask,
+        env=env,
+        ln_gamma=np.zeros(C, dtype=float),
     )
+    _update_activity(ctx, c0)
+    return ctx
 
 
-def _compute_lnQ(ctx: EquilibriumContext, c_safe: np.ndarray) -> np.ndarray:
-    return ctx.A @ np.log(c_safe)
+def _compute_lnQ(ctx: EquilibriumContext, c_safe: np.ndarray, c_actual: np.ndarray = None) -> np.ndarray:
+    if c_actual is not None:
+        _update_activity(ctx, c_actual)
+    elif ctx.ln_gamma is None:
+        _update_activity(ctx, c_safe)
+    return ctx.A @ (np.log(c_safe) + ctx.ln_gamma)
 
 
 def _compute_jacobian(ctx: EquilibriumContext, c_safe: np.ndarray, jacobian_scale: np.ndarray) -> np.ndarray:
@@ -210,8 +229,9 @@ def _reaction_quotient_errors(
     x: np.ndarray,
 ) -> np.ndarray:
     """Per-reaction |Q/K - 1| for finite-K reactions (always computed, not masked)."""
-    c_safe = _safe_concentrations(ctx.c0 + ctx.S @ x, ctx.min_concentration)
-    lnQ = _compute_lnQ(ctx, c_safe)
+    c = ctx.c0 + ctx.S @ x
+    c_safe = _safe_concentrations(c, ctx.min_concentration)
+    lnQ = _compute_lnQ(ctx, c_safe, c)
     q_over_k = np.exp(lnQ - ctx.lnK)
     errors = np.abs(q_over_k - 1.0)
     errors[ctx.infinite_k_mask] = 0.0
@@ -240,9 +260,12 @@ def _active_residual(
     c_safe: np.ndarray,
     loss_fn: EquilibriumLoss,
     *,
+    c_actual: np.ndarray = None,
     negligible_threshold: float = 1e-8,
 ) -> np.ndarray:
-    lnQ = _compute_lnQ(ctx, c_safe)
+    if c_actual is None:
+        c_actual = c_safe
+    lnQ = _compute_lnQ(ctx, c_safe, c_actual)
     residual = loss_fn.residual(lnQ, ctx.lnK)
     residual = residual.copy()
     for i in range(ctx.R):
@@ -300,7 +323,7 @@ def _needs_warm_start(
     """True when zero-product concentrations block first-order methods."""
     c = ctx.c0 + ctx.S @ x
     c_safe = _safe_concentrations(c, ctx.min_concentration)
-    residual = _active_residual(ctx, c_safe, loss_fn)
+    residual = _active_residual(ctx, c_safe, loss_fn, c_actual=c)
     if float(np.linalg.norm(residual, ord=2)) < max(10.0 * tol, 1e-6):
         return False
     zero_in_quotient = any(c[j] <= 0 and np.any(ctx.A[:, j] != 0) for j in range(ctx.C))
@@ -320,7 +343,7 @@ def _newton_warm_start(
     for _ in range(max_steps):
         c = ctx.c0 + ctx.S @ x
         c_safe = _safe_concentrations(c, ctx.min_concentration)
-        residual = _active_residual(ctx, c_safe, loss_fn)
+        residual = _active_residual(ctx, c_safe, loss_fn, c_actual=c)
         residual_norm = float(np.linalg.norm(residual, ord=2))
         if residual_norm < 1.0:
             break
@@ -340,7 +363,7 @@ def _newton_warm_start(
             c_new = ctx.c0 + ctx.S @ x_new
             if np.all(c_new >= -1e-15):
                 c_new_safe = _safe_concentrations(c_new, ctx.min_concentration)
-                r_new = _active_residual(ctx, c_new_safe, loss_fn)
+                r_new = _active_residual(ctx, c_new_safe, loss_fn, c_actual=c_new)
                 if float(np.linalg.norm(r_new, ord=2)) < residual_norm or step < 1e-10:
                     x = x_new
                     improved = True
@@ -379,9 +402,9 @@ def _build_result(
 
     c = ctx.c0 + ctx.S @ x
     c_safe = _safe_concentrations(c, ctx.min_concentration)
-    residual = _active_residual(ctx, c_safe, loss_fn)
+    residual = _active_residual(ctx, c_safe, loss_fn, c_actual=c)
     residual_norm = float(np.linalg.norm(residual, ord=2))
-    lnQ = _compute_lnQ(ctx, c_safe)
+    lnQ = _compute_lnQ(ctx, c_safe, c)
     q_over_k = np.exp(lnQ - ctx.lnK)
     q_over_k = q_over_k.copy()
     q_over_k[ctx.infinite_k_mask] = 0.0
@@ -438,8 +461,8 @@ def _run_bgd(
         c = ctx.c0 + ctx.S @ x
         c_safe = _safe_concentrations(c, ctx.min_concentration)
 
-        lnQ = _compute_lnQ(ctx, c_safe)
-        residual = _active_residual(ctx, c_safe, loss_fn)
+        lnQ = _compute_lnQ(ctx, c_safe, c)
+        residual = _active_residual(ctx, c_safe, loss_fn, c_actual=c)
 
         errors = _reaction_quotient_errors(ctx, x)
         if _quotient_error_converged(errors, quotient_error_limit, ctx.infinite_k_mask):
@@ -466,7 +489,7 @@ def _run_bgd(
             c_new = ctx.c0 + ctx.S @ x_new
             if np.all(c_new >= -1e-15):
                 c_new_safe = _safe_concentrations(c_new, ctx.min_concentration)
-                r_new = _active_residual(ctx, c_new_safe, loss_fn)
+                r_new = _active_residual(ctx, c_new_safe, loss_fn, c_actual=c_new)
                 f_new = loss_fn.objective(r_new)
                 if f_new <= f_curr or step < 1e-12:
                     x = x_new
@@ -503,7 +526,8 @@ def _run_sgd(
             c_safe = _safe_concentrations(c, ctx.min_concentration)
             inv_c = 1.0 / c_safe
 
-            lnQ_i = ctx.A[i, :] @ np.log(c_safe)
+            _update_activity(ctx, c)
+            lnQ_i = ctx.A[i, :] @ (np.log(c_safe) + ctx.ln_gamma)
             r_i = loss_fn.residual(np.array([lnQ_i]), np.array([ctx.lnK[i]]))[0]
             if _use_residual_tolerance(quotient_error_limit) and abs(r_i) < tol:
                 continue
@@ -521,7 +545,8 @@ def _run_sgd(
                 c_new = ctx.c0 + ctx.S @ x_new
                 if np.all(c_new >= -1e-15):
                     c_new_safe = _safe_concentrations(c_new, ctx.min_concentration)
-                    lnQ_i_new = ctx.A[i, :] @ np.log(c_new_safe)
+                    _update_activity(ctx, c_new)
+                    lnQ_i_new = ctx.A[i, :] @ (np.log(c_new_safe) + ctx.ln_gamma)
                     r_i_new = loss_fn.residual(np.array([lnQ_i_new]), np.array([ctx.lnK[i]]))[0]
                     f_new = loss_fn.objective(np.array([r_i_new]))
                     if f_new <= f_curr or step < 1e-12:
@@ -537,7 +562,7 @@ def _run_sgd(
 
         c_full = ctx.c0 + ctx.S @ x
         c_full_safe = _safe_concentrations(c_full, ctx.min_concentration)
-        full_residual = _active_residual(ctx, c_full_safe, loss_fn)
+        full_residual = _active_residual(ctx, c_full_safe, loss_fn, c_actual=c_full)
 
         if _use_residual_tolerance(quotient_error_limit) and np.linalg.norm(full_residual, ord=2) < tol:
             stop_reason = "residual_tol"
@@ -567,7 +592,7 @@ def _run_newton(
         c = ctx.c0 + ctx.S @ x
         c_safe = _safe_concentrations(c, ctx.min_concentration)
 
-        residual = _active_residual(ctx, c_safe, loss_fn)
+        residual = _active_residual(ctx, c_safe, loss_fn, c_actual=c)
 
         errors = _reaction_quotient_errors(ctx, x)
         if _quotient_error_converged(errors, quotient_error_limit, ctx.infinite_k_mask):
@@ -594,7 +619,7 @@ def _run_newton(
             c_new = ctx.c0 + ctx.S @ x_new
             if np.all(c_new >= -1e-15):
                 c_new_safe = _safe_concentrations(c_new, ctx.min_concentration)
-                r_new = _active_residual(ctx, c_new_safe, loss_fn)
+                r_new = _active_residual(ctx, c_new_safe, loss_fn, c_actual=c_new)
                 f_new = loss_fn.objective(r_new)
                 if f_new <= f_curr or step < 1e-12:
                     x = x_new
