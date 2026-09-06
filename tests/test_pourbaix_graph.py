@@ -16,12 +16,10 @@ from ChemCompute._pourbaix_graph import (
 from test_pourbaix import ka, selenium_environment
 
 
-def aq(formula: str, *, charge: int = 0) -> Compound:
-    return Compound(
-        formula,
-        phase_point_list=[{"phase": "aq", "temperature": 298}],
-        charge=charge,
-    )
+def aq(formula: str) -> Compound:
+    from ChemCompute._formula import compound_from_species_token
+
+    return compound_from_species_token(f"{formula}.aq")
 
 
 def test_se_boundary_eh_spot_checks():
@@ -46,8 +44,8 @@ def test_se_seo3_dominance():
 
 
 def test_fe_pourbaix_smoke():
-    hr = HalfReaction.from_string_simple_syntax(
-        "Fe+3 + @e = Fe+2",
+    hr = HalfReaction.from_string(
+        "Fe+3 & @e = Fe+2",
         concentrations=[0.01, 0.001],
         E0=0.771,
     )
@@ -55,8 +53,8 @@ def test_fe_pourbaix_smoke():
     kw = Reaction(
         reactants=[{"stoichiometric_coefficient": 1, "compound": water, "rate_dependency": 0}],
         products=[
-            {"stoichiometric_coefficient": 1, "compound": aq("H+", charge=1), "rate_dependency": 1},
-            {"stoichiometric_coefficient": 1, "compound": aq("OH-", charge=-1), "rate_dependency": 1},
+            {"stoichiometric_coefficient": 1, "compound": aq("H+"), "rate_dependency": 1},
+            {"stoichiometric_coefficient": 1, "compound": aq("OH-"), "rate_dependency": 1},
         ],
         reactants_concentration=[0.0],
         products_concentration=[0.0, 0.0],
@@ -88,8 +86,8 @@ def test_multi_element_chains():
     assert len(se_graph.chains) == 1
     assert se_graph.chains[0].element == "Se"
 
-    hr_i = HalfReaction.from_string_simple_syntax(
-        "I2 + @e = I-",
+    hr_i = HalfReaction.from_string(
+        "I2 & @e = I-",
         concentrations=[1.0, 1.0],
         E0=0.54,
     )

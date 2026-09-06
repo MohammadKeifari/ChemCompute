@@ -25,14 +25,14 @@ def _reject_electron_formula(formula: str) -> None:
 
 
 def _normalize_compound(entry):
-    from ._general import Compound
+    from ._formula import compound_from_species_token
 
     compound = entry["compound"]
     if isinstance(compound, str):
         _reject_electron_formula(compound)
         entry = dict(entry)
-        entry["compound"] = Compound(compound)
-    elif isinstance(compound, Compound):
+        entry["compound"] = compound_from_species_token(compound)
+    elif hasattr(compound, "formula"):
         _reject_electron_formula(compound.formula)
     return entry
 
@@ -95,21 +95,15 @@ def apply_electrode_potential(env) -> None:
         rxn.K = hr.K_at(eh, pH, T=env.T)
 
 
-def _tokenize_half_side(side: str, syntax: str) -> list[str]:
+def _tokenize_half_side(side: str) -> list[str]:
     side = side.replace(" ", "")
     side = re.sub(r"\+(?=@e)", "", side)
     electron = r"(?:\d+(?:\.\d+)?_)?@e"
     ion_suffix = r"(?:[+-]\d*|\+\d*|-\d*)?"
-    if syntax == "complex":
-        term = (
-            rf"\d+(?:\.\d+)?_[A-Za-z0-9.\-()]+{ion_suffix}(?:\.(?:s|l|g|aq))?"
-            rf"|[A-Za-z0-9.\-()]+{ion_suffix}(?:\.(?:s|l|g|aq))?"
-        )
-    else:
-        term = (
-            rf"\d+(?:\.\d+)?[A-Za-z0-9.\-()]+{ion_suffix}(?:\.[A-Za-z]+)?"
-            rf"|[A-Za-z0-9.\-()]+{ion_suffix}(?:\.[A-Za-z]+)?"
-        )
+    term = (
+        rf"\d+(?:\.\d+)?_[A-Za-z0-9.\-()\[\]]+{ion_suffix}(?:\.(?:s|l|g|aq))?"
+        rf"|[A-Za-z0-9.\-()\[\]]+{ion_suffix}(?:\.(?:s|l|g|aq))?"
+    )
     pattern = rf"(?:{electron}|{term})"
     tokens = re.findall(pattern, side)
     if not tokens:
@@ -117,21 +111,18 @@ def _tokenize_half_side(side: str, syntax: str) -> list[str]:
     return tokens
 
 
-def _split_side_sections(side: str, syntax: str) -> list[str]:
+def _split_side_sections(side: str) -> list[str]:
     side = side.replace(" ", "")
-    if syntax == "complex":
-        chunks = [chunk for chunk in side.split("&") if chunk]
-    else:
-        chunks = [side]
+    chunks = [chunk for chunk in side.split("&") if chunk]
     tokens: list[str] = []
     for chunk in chunks:
-        tokens.extend(_tokenize_half_side(chunk, syntax))
+        tokens.extend(_tokenize_half_side(chunk))
     return tokens
 
 
-def _parse_side_tokens(side: str, syntax: str) -> tuple[list[dict], float]:
+def _parse_side_tokens(side: str) -> tuple[list[dict], float]:
     """Parse one side of a half-reaction string; return species list and electron count."""
-    sections = _split_side_sections(side, syntax)
+    sections = _split_side_sections(side)
     species: list[dict] = []
     n_electrons = 0.0
     for section in sections:
@@ -149,42 +140,16 @@ def _parse_side_tokens(side: str, syntax: str) -> tuple[list[dict], float]:
         if "@" in section:
             raise ValueError(f"Invalid electron token {section!r}; use @e or n_@e.")
 
-        if syntax == "complex":
-            compound_info = _parse_complex_section(section)
-        else:
-            compound_info = _parse_simple_section(section)
-        species.append(compound_info)
+        species.append(_parse_section(section))
     return species, n_electrons
 
 
-def _parse_simple_section(section: str) -> dict:
-    if re.match(
-        r"^(?:"
-        r"\d+(?:\.\d+)?[A-Za-z]+(?:\.[A-Za-z]+)?-?\d+(?:\.\d+)?|"
-        r"\d+(?:\.\d+)?[A-Za-z]+(?:\.[A-Za-z]+)?|"
-        r"[A-Za-z]+(?:\.[A-Za-z]+)?-?\d+(?:\.\d+)?|"
-        r"[A-Za-z0-9+.\-()]+(?:\.[A-Za-z]+)?"
-        r")$"
-        ,
-        section,
-    ) is None:
-        raise ValueError(f"Invalid half-reaction term: {section!r}")
-
-    stoich = 1.0
-    name = section
-    lead = re.match(r"^(\d+(?:\.\d+)?)([A-Za-z0-9+.\-()]+.*)$", section)
-    if lead and not lead.group(2).startswith("."):
-        stoich = float(lead.group(1))
-        name = lead.group(2)
-    return {"stoichiometric_coefficient": stoich, "compound": name, "rate_dependency": 1}
-
-
-def _parse_complex_section(section: str) -> dict:
+def _parse_section(section: str) -> dict:
     acceptable = re.compile(
-        r"^(\d+(?:\.\d+)?_[A-Za-z0-9+.\-()]+_-?\d+(?:\.\d+)?|"
-        r"\d+(?:\.\d+)?_[A-Za-z0-9+.\-()]+|"
-        r"[A-Za-z0-9+.\-()]+_-?\d+(?:\.\d+)?|"
-        r"[A-Za-z0-9+.\-()]+)(\.s|\.g|\.l|\.aq)?$"
+        r"^(\d+(?:\.\d+)?_[A-Za-z0-9+.\-()\[\]]+_-?\d+(?:\.\d+)?|"
+        r"\d+(?:\.\d+)?_[A-Za-z0-9+.\-()\[\]]+|"
+        r"[A-Za-z0-9+.\-()\[\]]+_-?\d+(?:\.\d+)?|"
+        r"[A-Za-z0-9+.\-()\[\]]+)(\.s|\.g|\.l|\.aq)?$"
     )
     if not acceptable.match(section):
         raise ValueError(f"Invalid half-reaction term: {section!r}")
@@ -230,24 +195,14 @@ def _parse_complex_section(section: str) -> dict:
 
 
 def _assign_compounds(species_list: list[dict], T: float) -> None:
+    from ._formula import compound_from_species_token
     from ._general import Compound
 
     for entry in species_list:
         name = entry["compound"]
         if isinstance(name, Compound):
             continue
-        if re.match(r"^.*\.(s|g|l)$", name):
-            entry["compound"] = Compound(
-                formula=name[:-2],
-                phase_point_list=[{"temperature": T, "phase": name[-1]}],
-            )
-        elif re.match(r"^.*\.aq$", name):
-            entry["compound"] = Compound(
-                formula=name[:-3],
-                phase_point_list=[{"temperature": T, "phase": "aq"}],
-            )
-        else:
-            entry["compound"] = Compound(formula=name)
+        entry["compound"] = compound_from_species_token(name, T=T)
 
 
 @dataclass
@@ -299,7 +254,7 @@ class HalfReaction:
             self.compounds.append(item)
 
     @classmethod
-    def from_string_simple_syntax(
+    def from_string(
         cls,
         reaction_str: str,
         *,
@@ -307,37 +262,12 @@ class HalfReaction:
         E0: float = 0.0,
         T: float = 298,
         name: str = "",
-    ) -> "HalfReaction":
-        return cls._from_string(reaction_str, syntax="simple", concentrations=concentrations, E0=E0, T=T, name=name)
-
-    @classmethod
-    def from_string_complex_syntax(
-        cls,
-        reaction_str: str,
-        *,
-        concentrations: Optional[list[float]] = None,
-        E0: float = 0.0,
-        T: float = 298,
-        name: str = "",
-    ) -> "HalfReaction":
-        return cls._from_string(reaction_str, syntax="complex", concentrations=concentrations, E0=E0, T=T, name=name)
-
-    @classmethod
-    def _from_string(
-        cls,
-        reaction_str: str,
-        *,
-        syntax: str,
-        concentrations: Optional[list[float]],
-        E0: float,
-        T: float,
-        name: str,
     ) -> "HalfReaction":
         if "=" not in reaction_str:
             raise ValueError("Half-reaction strings must use '=' as the separator.")
         left, right = reaction_str.replace(" ", "").split("=", 1)
-        oxidized, n_left = _parse_side_tokens(left, syntax)
-        reduced, n_right = _parse_side_tokens(right, syntax)
+        oxidized, n_left = _parse_side_tokens(left)
+        reduced, n_right = _parse_side_tokens(right)
         n_electrons = n_left + n_right
         if n_electrons <= 0:
             raise ValueError("Half-reaction must include @e on the oxidized (left) side.")

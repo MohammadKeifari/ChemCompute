@@ -36,8 +36,8 @@ Every calculation starts with compounds, reactions, and an environment.
 ```python
 from ChemCompute import Compound, Reaction, Enviroment
 
-# Simple syntax: A <=> B
-rxn = Reaction.from_string_simple_syntax(
+# Simple reversible reaction: A <=> B
+rxn = Reaction.from_string(
     "A > B",
     concentrations=[1.0, 0.0],
     K=2.0,
@@ -51,8 +51,8 @@ env = Enviroment(rxn, T=298)  # Kelvin
 Multiple reactions share compounds automatically:
 
 ```python
-rxn1 = Reaction.from_string_simple_syntax("A > B", [1.0, 0.0], K=2.0, kf=0.5, kb=0.25)
-rxn2 = Reaction.from_string_simple_syntax("B > C", [0.0, 0.0], K=1.5, kf=0.3, kb=0.2)
+rxn1 = Reaction.from_string("A > B", [1.0, 0.0], K=2.0, kf=0.5, kb=0.25)
+rxn2 = Reaction.from_string("B > C", [0.0, 0.0], K=1.5, kf=0.3, kb=0.2)
 
 env = Enviroment(rxn1, rxn2, T=298)
 env.concentrations = [1.0, 0.0, 0.0]  # [A, B, C]
@@ -67,7 +67,45 @@ Useful accessors:
 | `env.concentrations_dict` | `{formula: concentration}` mapping |
 | `env.compound_labels` | Formula strings aligned with concentration vectors |
 
-Reactions can also be built with `Reaction.from_string_complex_syntax()` or explicit reactant/product lists. See `tests/manual/manual_validation.py` for varied examples (phases, buffers, precipitation, coupled networks).
+Reactions can also be built with explicit reactant/product lists. See `tests/manual/manual_validation.py` for varied examples (phases, buffers, precipitation, coupled networks).
+
+### Reaction string notation
+
+Use `Reaction.from_string(...)` and `HalfReaction.from_string(...)` with a single grammar:
+
+| Role | Token | Example |
+|------|-------|---------|
+| Species on one side | `&` | `HSeO4- & 3_H+ & 2_@e` |
+| Reaction direction | `>` | `HA > H+ & A-` |
+| Half-reaction sides | `=` | `Ox = Red` |
+| Stoichiometry | prefix `n_` | `3_H+`, `2_@e` |
+| Rate order (Reaction) | suffix `_n` | `A_2` (optional) |
+| Phase | suffix | `.aq`, `.s`, `.l`, `.g` |
+| Electrons | `@e` only | never bare `e-` in Reaction |
+
+Ionic charge is inferred from trailing `+` / `-` in species names (`H+`, `SeO4-2`, `Fe(CN)6-4`, `[Fe(CN)6]-4`). When compounds are added to an `Enviroment`, non-zero charges are copied into `env.charge_map` automatically (explicit `charge_map` entries still win at activity time).
+
+**Concentrations** may be a `{formula: amount}` dict (missing species default to `0`) or a legacy ordered list. Mark excess species (fixed activity) with `XS(amount)` in reaction or environment concentration dicts; use bare `XS()` in `env.set_excess({...})` to keep the current amount.
+
+```python
+from ChemCompute import XS
+
+kw = Reaction.from_string(
+    "H2O.l > H+ & OH-",
+    K=1e-14,
+    concentrations={"H2O": XS(55.5), "H+": 0, "OH-": 0},
+)
+ka = Reaction.from_string("H2SeO3 > H+ & HSeO3-", K=10**-2.62, concentrations={"H2SeO3": 0, "H+": 0, "HSeO3-": 0})
+hr = HalfReaction.from_string(
+    "HSeO4- & 3_H+ & 2_@e = H2SeO3 & H2O.l",
+    concentrations=[1.0, 0, 0, 0],
+    E0=1.15,
+)
+env = Enviroment(kw, ka, hr, concentrations={"HSeO4-": 1.0}, buffer=["H+"])
+env.set_excess({"H2O": XS()})  # optional env-level excess override
+```
+
+**Migration:** replace `+` between species with `&` (e.g. `A + B > C` → `A & B > C`; `Fe+3 + @e = Fe+2` → `Fe+3 & @e = Fe+2`).
 
 ---
 
@@ -95,7 +133,7 @@ env = Enviroment(
 ### Standalone reaction solvers
 
 ```python
-rxn = Reaction.from_string_simple_syntax("A > B", [1.0, 0.0], K=2.0, kf=0.5, kb=0.25)
+rxn = Reaction.from_string("A > B", [1.0, 0.0], K=2.0, kf=0.5, kb=0.25)
 final = rxn.equilibrium(method="newton", tol=1e-10)
 traces = rxn.kinetics(time=5.0, accuracy=1e-3)
 ```
@@ -257,7 +295,7 @@ env.kinetics(time=5.0, plot="save", directory="approach.png")
 Pass enthalpy, entropy, and activation energies when defining a reaction. Changing `rxn.T` or `env.T` updates **K** (van't Hoff) and **kf** / **kb** (Arrhenius):
 
 ```python
-rxn = Reaction.from_string_simple_syntax(
+rxn = Reaction.from_string(
     "A > B",
     K=2.0, kf=0.5, kb=0.25,
     enthalpy=-50000,
@@ -285,7 +323,7 @@ Correct Q/K at non-negligible ionic strength with Debye–Hückel, Davies, or Pi
 from ChemCompute import ActivityModel
 
 env = Enviroment(rxn, activity_model="davies")
-env.charge_map = {"Ca2+": 2, "F-": -1}  # overrides Compound.charge
+env.charge_map = {"Ca2+": 2, "F-": -1}  # overrides auto-inferred Compound.charge
 # or: Compound("Na+", charge=1, ...)
 ```
 
@@ -395,8 +433,8 @@ Half-reactions use **`@e`** as the electron token (never `e` or `e-` in `Reactio
 ```python
 from ChemCompute import Compound, Enviroment, HalfReaction, Pourbaix
 
-hr = HalfReaction.from_string_simple_syntax(
-    "Fe+3 + @e = Fe+2",
+hr = HalfReaction.from_string(
+    "Fe+3 & @e = Fe+2",
     concentrations=[0.01, 0.001],  # [Fe+3], [Fe+2] — no slot for @e
     E0=0.771,
 )
@@ -447,11 +485,11 @@ for junction in diagram.junction_points:
     print(junction.label, junction.pH, junction.Eh)
 ```
 
-Complex syntax uses `=` and `&`:
+Complex syntax uses `=`, `&`, and `@e`:
 
 ```python
-HalfReaction.from_string_complex_syntax(
-    "Fe(OH)3.s & 3_H+ + @e = Fe+2 & 3_H2O.l",
+HalfReaction.from_string(
+    "Fe(OH)3.s & 3_H+ & @e = Fe+2 & 3_H2O.l",
     concentrations=[1.0, 1e-7, 0.05, 1.0],
     E0=-0.55,
 )

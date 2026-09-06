@@ -1,0 +1,60 @@
+---
+description: Prefer Reaction.from_string and HalfReaction.from_string in tests and examples
+globs: tests/**/*.py,README.md,docs/**/*.md
+alwaysApply: false
+---
+
+# Use from_string for reactions
+
+When adding or editing tests, manual validation cases, or doc examples, build reactions from strings instead of hand-assembling reactant/product dicts—unless the test explicitly targets `Compound` construction or parser edge cases.
+
+## APIs
+
+- `Reaction.from_string(...)` — chemical equilibrium reactions (`>` between sides)
+- `HalfReaction.from_string(...)` — redox half-reactions (`=` between sides, `@e` for electrons)
+
+Do **not** use removed APIs: `from_string_simple_syntax`, `from_string_complex_syntax`.
+
+## Concentrations
+
+Prefer `{formula: amount}` dicts (missing species default to `0`). Legacy ordered lists still work.
+
+- `XS(amount)` — excess species with explicit concentration (stored on the reaction entry, not only on `Compound`)
+- `XS()` — mark excess but keep current amount (`env.set_excess` overrides)
+
+Pass `infinite_K=True` to `Reaction.from_string` when needed.
+
+## String grammar
+
+| Token | Meaning | Example |
+|-------|---------|---------|
+| `&` | separate species on one side | `A & B > C` |
+| `>` | reactants → products | `HA > H+ & A-` |
+| `=` | oxidized = reduced (half-reaction) | `Fe+3 & @e = Fe+2` |
+| `n_` | stoichiometry prefix | `3_H+`, `2_@e` |
+| `.aq`, `.s`, `.l`, `.g` | phase suffix | `H2O.l`, `Se.s` |
+
+Ionic charge is inferred from trailing `+` / `-` (`H+`, `SeO4-2`). Put charge before phase when both apply: `C-1.l`, not `C.l-1`.
+
+## Prefer string builders
+
+```python
+from ChemCompute import XS
+
+# ✅ GOOD
+rxn = Reaction.from_string(
+    "H2O.l > H+ & OH-",
+    K=1e-14,
+    concentrations={"H2O": XS(55.5), "H+": 0, "OH-": 0},
+    infinite_K=False,
+)
+hr = HalfReaction.from_string("Fe+3 & @e = Fe+2", concentrations=[0.01, 0.001], E0=0.771)
+
+# ❌ AVOID unless testing Compound behavior directly
+rxn = Reaction(reactants=[...], products=[...], reactants_concentration=[...], ...)
+```
+
+## When manual `Compound(...)` is OK
+
+- Testing `compound_from_species_token`, charge inference, or phase handling directly
+- Asserting low-level stoichiometry structures unrelated to string parsing

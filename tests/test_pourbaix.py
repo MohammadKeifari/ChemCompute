@@ -13,21 +13,19 @@ from ChemCompute._pourbaix_graph import build_pourbaix_graph, element_totals_fro
 POURBAIX_OUTPUT_DIR = Path(__file__).resolve().parent.parent / "manual_test_output" / "pourbaix"
 
 
-def aq(formula: str, *, charge: int = 0) -> Compound:
-    return Compound(
-        formula,
-        phase_point_list=[{"phase": "aq", "temperature": 298}],
-        charge=charge,
-    )
+def aq(formula: str) -> Compound:
+    from ChemCompute._formula import compound_from_species_token
+
+    return compound_from_species_token(f"{formula}.aq")
 
 
-def ka(acid: str, base: str, pka: float, *, charge_acid: int = 0, charge_base: int = -1) -> Reaction:
+def ka(acid: str, base: str, pka: float) -> Reaction:
     """Acid dissociation HA ⇌ H+ + A-. H+ concentration is managed by Pourbaix."""
     return Reaction(
-        reactants=[{"stoichiometric_coefficient": 1, "compound": aq(acid, charge=charge_acid), "rate_dependency": 1}],
+        reactants=[{"stoichiometric_coefficient": 1, "compound": aq(acid), "rate_dependency": 1}],
         products=[
-            {"stoichiometric_coefficient": 1, "compound": aq("H+", charge=1), "rate_dependency": 1},
-            {"stoichiometric_coefficient": 1, "compound": aq(base, charge=charge_base), "rate_dependency": 1},
+            {"stoichiometric_coefficient": 1, "compound": aq("H+"), "rate_dependency": 1},
+            {"stoichiometric_coefficient": 1, "compound": aq(base), "rate_dependency": 1},
         ],
         reactants_concentration=[0.0],
         products_concentration=[0.0, 0.0],
@@ -41,35 +39,35 @@ def selenium_environment(c_tot: float = 1.0) -> Enviroment:
     kw = Reaction(
         reactants=[{"stoichiometric_coefficient": 1, "compound": water, "rate_dependency": 0}],
         products=[
-            {"stoichiometric_coefficient": 1, "compound": aq("H+", charge=1), "rate_dependency": 1},
-            {"stoichiometric_coefficient": 1, "compound": aq("OH-", charge=-1), "rate_dependency": 1},
+            {"stoichiometric_coefficient": 1, "compound": aq("H+"), "rate_dependency": 1},
+            {"stoichiometric_coefficient": 1, "compound": aq("OH-"), "rate_dependency": 1},
         ],
         reactants_concentration=[0.0],
         products_concentration=[0.0, 0.0],
         K=1e-14,
     )
 
-    hr1 = HalfReaction.from_string_complex_syntax(
-        "HSeO4- & 3_H+ + 2_@e = H2SeO3 & H2O.l",
+    hr1 = HalfReaction.from_string(
+        "HSeO4- & 3_H+ & 2_@e = H2SeO3 & H2O.l",
         E0=1.15,
         name="HSeO4-/H2SeO3",
     )
-    hr2 = HalfReaction.from_string_complex_syntax(
-        "H2SeO3 & 4_H+ + 4_@e = Se.s & 3_H2O.l",
+    hr2 = HalfReaction.from_string(
+        "H2SeO3 & 4_H+ & 4_@e = Se.s & 3_H2O.l",
         E0=0.74,
         name="H2SeO3/Se",
     )
-    hr3 = HalfReaction.from_string_complex_syntax(
-        "Se.s & 2_H+ + 2_@e = H2Se",
+    hr3 = HalfReaction.from_string(
+        "Se.s & 2_H+ & 2_@e = H2Se",
         E0=-0.11,
         name="Se/H2Se",
     )
 
     return Enviroment(
         kw,
-        ka("HSeO4-", "SeO4-2", 1.92, charge_acid=-1, charge_base=-2),
+        ka("HSeO4-", "SeO4-2", 1.92),
         ka("H2SeO3", "HSeO3-", 2.62),
-        ka("HSeO3-", "SeO3-2", 7.19, charge_acid=-1, charge_base=-2),
+        ka("HSeO3-", "SeO3-2", 7.19),
         ka("H2Se", "HSe-", 3.89),
         hr1,
         hr2,

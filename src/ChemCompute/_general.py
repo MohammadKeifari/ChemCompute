@@ -6,6 +6,66 @@ import numpy as np
 POURBAIX_RESERVED_SPECIES = frozenset({"H+", "OH-"})
 
 
+class XS:
+    """
+    Excess-species marker for concentration dictionaries.
+
+    ``XS(amount)`` sets concentration and marks the species as excess (fixed activity).
+    Bare ``XS()`` keeps the current amount and only marks excess (environment overrides).
+    """
+
+    __slots__ = ("amount",)
+
+    def __init__(self, amount=None):
+        self.amount = None if amount is None else float(amount)
+
+    def __repr__(self) -> str:
+        if self.amount is None:
+            return "XS()"
+        return f"XS({self.amount})"
+
+
+def _is_xs(value) -> bool:
+    """Return True when a concentration override marks excess."""
+    return isinstance(value, XS) or (isinstance(value, str) and value.upper() == "XS")
+
+
+def _species_formula(entry) -> str:
+    compound = entry["compound"]
+    return compound.formula if hasattr(compound, "formula") else str(compound)
+
+
+def _resolve_concentration_spec(value, *, current: float = 0.0) -> tuple[float, bool]:
+    """Parse a concentration dict value into ``(concentration, excess)``."""
+    if _is_xs(value):
+        if isinstance(value, XS) and value.amount is not None:
+            return value.amount, True
+        return current, True
+    return float(value), False
+
+
+def _apply_concentration_map(entries: list[dict], concentration_map: dict) -> None:
+    """Apply formula->concentration mapping; missing species default to 0."""
+    for entry in entries:
+        formula = _species_formula(entry)
+        spec = concentration_map.get(formula, 0.0)
+        concentration, excess = _resolve_concentration_spec(spec, current=0.0)
+        entry["concentration"] = concentration
+        entry["excess"] = excess
+        if excess:
+            entry["compound"].excess = True
+
+
+def _apply_concentration_list(entries: list[dict], values: list) -> None:
+    """Apply ordered concentration values; each slot may be numeric or :class:`XS`."""
+    for entry, spec in zip(entries, values):
+        concentration, excess = _resolve_concentration_spec(spec, current=0.0)
+        entry["concentration"] = concentration
+        entry["excess"] = excess
+        if excess:
+            entry["compound"].excess = True
+
+
 def _filter_pourbaix_reserved_concentrations(concentrations, *, T=298):
     """Drop reserved pH species from user-supplied concentration maps."""
     from ._mixing import _resolve_compound_key
@@ -195,8 +255,9 @@ class Reaction:
     def __init__(self,
                  reactants : list[dict] ,
                  products : list[dict] ,
-                 reactants_concentration : list[float] ,
-                 products_concentration : list[float] ,
+                 reactants_concentration : list[float] = None,
+                 products_concentration : list[float] = None,
+                 concentrations : dict = None,
                  K : float = 1,
                  enthalpy : float = 0,
                  entropy : float = 0,
@@ -213,8 +274,16 @@ class Reaction:
         Args:
             reactants (list[dict]): List of reactant definitions.
             products (list[dict]): List of product definitions.
-            reactants_concentration (list[float]): Initial concentrations of reactants.
-            products_concentration (list[float]): Initial concentrations of products.
+            reactants_concentration (list, optional): Initial reactant concentrations
+                (legacy list form, one value per reactant in order). Values may be
+                numeric or :class:`XS`.
+            products_concentration (list, optional): Initial product concentrations
+                (legacy list form, one value per product in order). Values may be
+                numeric or :class:`XS`.
+            concentrations (dict, optional): ``{formula: amount}`` for all species in the
+                reaction. Missing species default to ``0``. Values may be numeric or
+                :class:`XS` to mark excess (``XS(amount)`` sets amount and excess;
+                bare ``XS()`` is for environment-style keep-current overrides only).
             K (float, optional): Equilibrium constant. Defaults to 1.
             kf (float, optional): Forward rate constant. Defaults to 1.
             kb (float, optional): Backward rate constant. Defaults to 1.
@@ -244,36 +313,59 @@ class Reaction:
         self.rate_law = "mass_action"
         self.bio_params = {}
         self.compounds = []
-        
-        counter = 0 
-        for compound in self.reactants :
-            from ._half_reaction import _reject_electron_formula
+        self._assign_species_concentrations(
+            reactants_concentration,
+            products_concentration,
+            concentrations,
+        )
+
+    def _assign_species_concentrations(
+        self,
+        reactants_concentration,
+        products_concentration,
+        concentrations,
+    ) -> None:
+        from ._half_reaction import _reject_electron_formula
+
+        for compound in self.reactants:
             spec = compound.get("compound")
             if isinstance(spec, str):
                 _reject_electron_formula(spec)
             elif hasattr(spec, "formula"):
                 _reject_electron_formula(spec.formula)
-            compound.update({"concentration" : reactants_concentration[counter]})
+        for compound in self.products:
+            spec = compound.get("compound")
+            if isinstance(spec, str):
+                _reject_electron_formula(spec)
+            elif hasattr(spec, "formula"):
+                _reject_electron_formula(spec.formula)
+
+        if concentrations is not None:
+            _apply_concentration_map(self.reactants, concentrations)
+            _apply_concentration_map(self.products, concentrations)
+        else:
+            if reactants_concentration is None or products_concentration is None:
+                raise ValueError(
+                    "Provide concentrations={formula: amount} or both "
+                    "reactants_concentration and products_concentration lists."
+                )
+            _apply_concentration_list(self.reactants, reactants_concentration)
+            _apply_concentration_list(self.products, products_concentration)
+
+        self.compounds = []
+        for compound in self.reactants:
             reactant = compound.copy()
-            reactant.update({"type" : "reactant"})
+            reactant.setdefault("excess", False)
+            reactant.update({"type": "reactant"})
             self.compounds.append(reactant)
-            counter += 1
-        counter = 0
-        for compound in self.products :
-            from ._half_reaction import _reject_electron_formula
-            spec = compound.get("compound")
-            if isinstance(spec, str):
-                _reject_electron_formula(spec)
-            elif hasattr(spec, "formula"):
-                _reject_electron_formula(spec.formula)
-            compound.update({"concentration" : products_concentration[counter]})
+        for compound in self.products:
             product = compound.copy()
-            product.update({"type" : "product"})
+            product.setdefault("excess", False)
+            product.update({"type": "product"})
             self.compounds.append(product)
-            counter += 1
     @classmethod
-    def from_string_complex_syntax(cls, reaction_str: str,
-                                   concentrations: list[float] = None,
+    def from_string(cls, reaction_str: str,
+                                   concentrations=None,
                                    K: float = 1,
                                    enthalpy: float = 0,
                                    entropy: float = 0,
@@ -281,42 +373,32 @@ class Reaction:
                                    kb: float = 1,
                                    activation_energy_forward: float = 0,
                                    activation_energy_backward: float = 0,
-                                   T: float = 298):
+                                   T: float = 298,
+                                   infinite_K: bool = False):
                                    
         """
-        Create a Reaction object from a string with complex syntax.
+        Create a Reaction from a string.
 
-        The complex syntax allows compound names to include numbers and symbols
-        such as + or -, and supports stoichiometric and rate order annotations.
+        Accepts the same thermodynamic and kinetic keyword arguments as
+        :meth:`__init__`, including ``infinite_K``.
+
+        ``concentrations`` may be a list (legacy, reactants then products in order)
+        or a ``{formula: amount}`` dict. Missing dict entries default to ``0``.
+        Use :class:`XS` values to mark excess species (e.g. ``{"H2O": XS(55.5)}``
+        or ``[XS(55.5), 1e-7, 1e-7]``).
 
         Format:
             "A & 2_B & ... > 3_C & 2_D_-1 & ..."
-            - Prefix number = stoichiometric coefficient (default = 1)
-            - Suffix number = rate dependency (default = 1)
-            - Compounds may contain digits and signs (+, -, ( )).
-            - Phases can be specified as .s, .l, .g, or .aq
+            - ``&`` separates species on each side; ``>`` separates reactants/products
+            - Prefix ``n_`` = stoichiometric coefficient (default 1)
+            - Suffix ``_n`` = rate order (default 1)
+            - Phases: ``.s``, ``.l``, ``.g``, ``.aq``
+            - Ionic charge inferred from trailing ``+`` / ``-`` in species names
 
         Example:
             "Fe(CN)6-3 & Ce+2 > Fe(CN)6-4 & Ce+3"
-
-        Args:
-            reaction_str (str): Reaction formula.
-            concentrations (list[float], optional): Concentrations of reactants and products in order.
-            K (float, optional): Equilibrium constant. Defaults to 1.
-            kf (float, optional): Forward rate constant. Defaults to 1.
-            kb (float, optional): Backward rate constant. Defaults to 1.
-            T (float, optional): Temperature in Kelvin. Defaults to 298.
-            enthalpy (float, optional): Enthalpy of the reaction. Defaults to 0.
-            entropy (float, optional): Entropy of the reaction. Defaults to 0.
-            activation_energy_forward (float, optional): Activation energy of the forward reaction. Defaults to 0.
-            activation_energy_backward (float, optional): Activation energy of the backward reaction. Defaults to 0.
-
-        Returns:
-            Reaction: Parsed Reaction instance.
-
-        Raises:
-            ValueError: If the reaction string format is invalid.
         """
+        from ._formula import compound_from_species_token
 
         reformed_reaction = reaction_str.replace(" ","").split(">")
         splited_to_component_reaction = [component.split("&") for component in reformed_reaction] 
@@ -371,220 +453,55 @@ class Reaction:
                 elif component_counter == 1:
                     inputed_products.append(compound_info)
             component_counter +=1    
-        counter = 0
-        
-        for section in inputed_reactants :
+        for index, section in enumerate(inputed_reactants):
             reactant = section["compound"]
             if isinstance(reactant, str):
                 from ._half_reaction import _reject_electron_formula
                 _reject_electron_formula(reactant)
-            if re.match(r'^.*\.(s|g|l)$', reactant):  
-                inputed_reactants[counter]["compound"] = Compound(formula=reactant[0:len(reactant)-2] , phase_point_list=[{"temperature" : T , "phase" : reactant[len(reactant)-1]}])
-            elif re.match(r'^.*\.aq$', reactant):
-                inputed_reactants[counter]["compound"] = Compound(formula=reactant[0:len(reactant)-3] , phase_point_list=[{"temperature" : T , "phase" : "aq"}])
-            else:
-                inputed_reactants[counter]["compound"] = Compound(formula=reactant)
-            counter += 1
-        
-        counter = 0
-        for section in inputed_products :
+            inputed_reactants[index]["compound"] = compound_from_species_token(reactant, T=T)
+
+        for index, section in enumerate(inputed_products):
             product = section["compound"]
             if isinstance(product, str):
                 from ._half_reaction import _reject_electron_formula
                 _reject_electron_formula(product)
-            if re.match(r'^.*\.(s|g|l)$', product):  
-                inputed_products[counter]["compound"] = Compound(formula=product[0:len(product)-2] , phase_point_list=[{"temperature" : T , "phase" : product[len(product)-1]}])
-            elif re.match(r'^.*\.aq$', product):
-                inputed_products[counter]["compound"] = Compound(formula=product[0:len(product)-3] , phase_point_list=[{"temperature" : T , "phase" : "aq"}])
-            else:
-                inputed_products[counter]["compound"] = Compound(formula=product)
-            counter += 1  
-        if concentrations == None:
-            concentrations = [0] * (len(inputed_reactants) + len(inputed_products))
-        reactants_concentration = concentrations[:len(inputed_reactants)]
-        products_concentrations = concentrations[len(inputed_reactants):]
-        return cls(inputed_reactants ,
-                   inputed_products,
-                   reactants_concentration ,
-                   products_concentrations ,
-                   K ,
-                   enthalpy ,
-                   entropy , 
-                   kf , 
-                   kb , 
-                   activation_energy_forward , 
-                   activation_energy_backward ,
-                   T)
-    @classmethod
-    def from_string_simple_syntax(cls,
-                                  reaction_str: str,
-                                  concentrations: list[float] = None,
-                                  K: float = 1,
-                                  enthalpy: float = 0,
-                                  entropy: float = 0,
-                                  kf: float = 1,
-                                  kb: float = 1,
-                                  activation_energy_forward: float = 0,
-                                  activation_energy_backward: float = 0,
-                                  T: float = 298):
-                                  
-                                  
-        """
-        Create a Reaction object from a string using simple syntax.
-
-        The simple syntax only allows alphabetic compound names (no +, -, or numbers inside names).
-        It also supports optional stoichiometric and rate dependency annotations.
-
-        Format:
-            "A + 2B + ... > 3C + 2D-1 + ..."
-            - Prefix number = stoichiometric coefficient (default = 1)
-            - Suffix number = rate dependency (default = 1)
-            - Phase can be added as .s, .l, .g, or .aq
-
-        Example:
-            "2A.g + B.g2 > C.l-1"
-
-        Args:
-            reaction_str (str): Reaction formula.
-            concentrations (list[float], optional): Reactant/product concentrations.
-            K (float, optional): Equilibrium constant. Defaults to 1.
-            kf (float, optional): Forward rate constant. Defaults to 1.
-            kb (float, optional): Backward rate constant. Defaults to 1.
-            T (float, optional): Temperature in Kelvin. Defaults to 298.
-            enthalpy (float, optional): Enthalpy of the reaction. Defaults to 0.
-            entropy (float, optional): Entropy of the reaction. Defaults to 0.
-            activation_energy_forward (float, optional): Activation energy of the forward reaction. Defaults to 0.
-            activation_energy_backward (float, optional): Activation energy of the backward reaction. Defaults to 0.
-
-        Returns:
-            Reaction: Parsed Reaction instance.
-
-        Raises:
-            ValueError: If the input reaction string does not match valid format.
-        """
-        reformed_reaction = reaction_str.replace(" ","").split(">")
-        splited_to_component_reaction = [component.split("+") for component in reformed_reaction] 
-        component_counter = 0
-        inputed_reactants = []
-        inputed_products = []
-        for component in splited_to_component_reaction:
-            counter = 0
-            acceptable_pattern_for_section = re.compile(
-                r'^(?:'
-                r'\d+(?:\.\d+)?[A-Za-z]+(?:\.[A-Za-z]+)?-?\d+(?:\.\d+)?|'  
-                r'\d+(?:\.\d+)?[A-Za-z]+(?:\.[A-Za-z]+)?|'                 
-                r'[A-Za-z]+(?:\.[A-Za-z]+)?-?\d+(?:\.\d+)?|'               
-                r'[A-Za-z]+(?:\.[A-Za-z]+)?'                         
-                r')$'   
+            inputed_products[index]["compound"] = compound_from_species_token(product, T=T)
+        if concentrations is None:
+            concentrations = {}
+        elif isinstance(concentrations, (list, tuple)):
+            reactants_concentration = list(concentrations[: len(inputed_reactants)])
+            products_concentrations = list(concentrations[len(inputed_reactants) :])
+            return cls(
+                inputed_reactants,
+                inputed_products,
+                reactants_concentration,
+                products_concentrations,
+                K=K,
+                enthalpy=enthalpy,
+                entropy=entropy,
+                kf=kf,
+                kb=kb,
+                activation_energy_forward=activation_energy_forward,
+                activation_energy_backward=activation_energy_backward,
+                T=T,
+                infinite_K=infinite_K,
             )
-            for section in component:
-                if not bool(acceptable_pattern_for_section.match(section)):
-                     raise ValueError("You can't make a reaction from string with this expression")
-                else:
-                    start_of_name_index = 0
-                    end_of_name_index = 0
-                    def is_number(str):
-                        try:
-                            float(str) 
-                            return True
-                        except ValueError:
-                            return False
-                    # number + name + number
-                    if re.match(r'^\d+(?:\.\d+)?[A-Za-z]+(?:\.[A-Za-z]+)?-?\d+(?:\.\d+)?$' , section) :
-                        for endpoint in range(len(section)) :
-                            if is_number(section[:endpoint]) and (not is_number(section[:endpoint + 1])) :
-                                start_of_name_index = endpoint 
-                                break
-                        for startpoint in range(start_of_name_index , len(section)):
-                            if is_number(section[startpoint:]) :
-                                end_of_name_index = startpoint 
-                                break
-                        compound_info = {
-                            "stoichiometric_coefficient" : float(section[:start_of_name_index]),
-                            "compound" : section[start_of_name_index:end_of_name_index],
-                            "rate_dependency" : float(section[end_of_name_index:])
-                            }
-                    # number + name
-                    elif re.match(r'^\d+(?:\.\d+)?[A-Za-z]+(?:\.[A-Za-z]+)?$' , section):
-                        end_of_name_index = len(section) 
-                        for endpoint in range(len(section)) :
-                            if is_number(section[:endpoint]) and (not is_number(section[:endpoint + 1])) :
-                                start_of_name_index = endpoint 
-                                break
-                        compound_info = {
-                            "stoichiometric_coefficient" : float(section[:start_of_name_index]),
-                            "compound" : section[start_of_name_index:end_of_name_index],
-                            "rate_dependency" : 1
-                            }
-                    # name + number
-                    elif re.match(r'^[A-Za-z]+(?:\.[A-Za-z]+)*-?\d+(?:\.\d+)?$' , section):
-                        start_of_name_index = 0
-                        for startpoint in range(len(section)):
-                            if is_number(section[startpoint:]) :
-                                end_of_name_index = startpoint 
-                                break
-                        compound_info = {
-                            "stoichiometric_coefficient" : 1,
-                            "compound" : section[start_of_name_index:end_of_name_index],
-                            "rate_dependency" : float(section[end_of_name_index:])
-                            }
-                    # name
-                    else :
-                        compound_info = {
-                            "stoichiometric_coefficient" : 1,
-                            "compound" : section,
-                            "rate_dependency" : 1
-                            }
-                        
-                if component_counter == 0:
-                    inputed_reactants.append(compound_info)
-                elif component_counter == 1:
-                    inputed_products.append(compound_info)
-            component_counter +=1  
-        counter = 0
-        
-        for section in inputed_reactants :
-            reactant = section["compound"]
-            if isinstance(reactant, str):
-                from ._half_reaction import _reject_electron_formula
-                _reject_electron_formula(reactant)
-            if re.match(r'^.*\.(s|g|l)$', reactant):  
-                inputed_reactants[counter]["compound"] = Compound(formula=reactant[0:len(reactant)-2] , phase_point_list=[{"temperature" : T , "phase" : reactant[len(reactant)-1]}])
-            elif re.match(r'^.*\.aq$', reactant):
-                inputed_reactants[counter]["compound"] = Compound(formula=reactant[0:len(reactant)-3] , phase_point_list=[{"temperature" : T , "phase" : "aq"}])
-            else:
-                inputed_reactants[counter]["compound"] = Compound(formula=reactant)
-            counter += 1
-        counter = 0
-        for section in inputed_products :
-            product = section["compound"]
-            if isinstance(product, str):
-                from ._half_reaction import _reject_electron_formula
-                _reject_electron_formula(product)
-            if re.match(r'^.*\.(s|g|l)$', product):  
-                inputed_products[counter]["compound"] = Compound(formula=product[0:len(product)-2] , phase_point_list=[{"temperature" : T , "phase" : product[len(product)-1]}])
-            elif re.match(r'^.*\.aq$', product):
-                inputed_products[counter]["compound"] = Compound(formula=product[0:len(product)-3] , phase_point_list=[{"temperature" : T , "phase" : "aq"}])
-            else:
-                inputed_products[counter]["compound"] = Compound(formula=product)
-            counter += 1  
-
-        if concentrations == None:
-            concentrations = [0] * (len(inputed_reactants) + len(inputed_products))
-        reactants_concentration = concentrations[:len(inputed_reactants)]
-        products_concentrations = concentrations[len(inputed_reactants):]
-        return cls(inputed_reactants ,
-                   inputed_products,
-                   reactants_concentration ,
-                   products_concentrations ,
-                   K ,
-                   enthalpy ,
-                   entropy , 
-                   kf , 
-                   kb , 
-                   activation_energy_forward , 
-                   activation_energy_backward ,
-                   T)
+        if isinstance(concentrations, dict):
+            return cls(
+                inputed_reactants,
+                inputed_products,
+                concentrations=concentrations,
+                K=K,
+                enthalpy=enthalpy,
+                entropy=entropy,
+                kf=kf,
+                kb=kb,
+                activation_energy_forward=activation_energy_forward,
+                activation_energy_backward=activation_energy_backward,
+                T=T,
+                infinite_K=infinite_K,
+            )
+        raise TypeError("concentrations must be a dict, list, or tuple.")
     @property
     def T(self):
         """
@@ -741,7 +658,7 @@ class Reaction:
                 new_reaction += (product)
             counter += 1  
          
-        return Reaction.from_string_complex_syntax(reaction_str =new_reaction,
+        return Reaction.from_string(reaction_str=new_reaction,
                                                    concentrations = concentrations,
                                                    enthalpy = enthalpy,
                                                    entropy = entropy,
@@ -903,6 +820,8 @@ class Enviroment():
                 equilibrium Q. None disables activity corrections.
             concentrations (dict, optional): Override or set species concentrations by
                 formula string or Compound key. Overrides values summed from reactions.
+                Use :data:`XS` to mark a species as excess without changing its amount,
+                or call :meth:`set_excess` after construction.
             volume (float, optional): Solution volume in litres. Default 1.0.
             buffer (list, set, or dict, optional): Species held at fixed concentration during
                 equilibrium and kinetics. Use ``buffer=["H+"]`` with ``concentrations={"H+": ...}``
@@ -1079,27 +998,80 @@ class Enviroment():
         labels = self.compound_labels
         return [labels.index(formula) for formula in self._buffer_targets]
 
-    def _apply_concentration_overrides(self, concentrations, *, allow_pourbaix_reserved=False):
-        """Apply concentration dict; overrides reaction-derived values."""
+    def _set_concentration(
+        self,
+        key,
+        value,
+        *,
+        excess: bool = False,
+        allow_pourbaix_reserved: bool = False,
+    ) -> None:
+        """Apply one concentration override; ``XS()`` keeps amount and marks excess."""
         from ._mixing import _resolve_compound_key
 
-        for key, value in concentrations.items():
-            compound = _resolve_compound_key(key, self.T)
-            formula = compound.formula
-            if formula in POURBAIX_RESERVED_SPECIES and not allow_pourbaix_reserved:
+        compound = _resolve_compound_key(key, self.T)
+        formula = compound.formula
+        if formula in POURBAIX_RESERVED_SPECIES and not allow_pourbaix_reserved:
+            raise ValueError(
+                f"{formula!r} is reserved for Pourbaix / constant-pH workflows. "
+                "Set it with set_buffer(['H+']) and apply_pourbaix_state(...), "
+                "or pass allow_pourbaix_reserved=True internally."
+            )
+
+        mark_excess = excess or _is_xs(value)
+        current = 0.0
+        if formula in self.compound_labels:
+            current = self.compounds_concentration[self.compound_labels.index(formula)]["concentration"]
+        numeric_value, parsed_excess = _resolve_concentration_spec(value, current=current)
+        mark_excess = mark_excess or parsed_excess
+        if not _is_xs(value) or (isinstance(value, XS) and value.amount is not None):
+            resolved_value = numeric_value
+        else:
+            resolved_value = None
+
+        if formula in self.compound_labels:
+            index = self.compound_labels.index(formula)
+            if resolved_value is not None:
+                self.compounds_concentration[index]["concentration"] = resolved_value
+            elif not mark_excess:
                 raise ValueError(
-                    f"{formula!r} is reserved for Pourbaix / constant-pH workflows. "
-                    "Set it with set_buffer(['H+']) and apply_pourbaix_state(...), "
-                    "or pass allow_pourbaix_reserved=True internally."
+                    f"Concentration override for {formula!r} must be numeric or XS."
                 )
-            if formula in self.compound_labels:
-                index = self.compound_labels.index(formula)
-                self.compounds_concentration[index]["concentration"] = float(value)
-            else:
-                self.compounds.append(compound)
-                self.compounds_concentration.append(
-                    {"compound": compound, "concentration": float(value)}
+            if mark_excess:
+                self.compounds[index].excess = True
+        else:
+            if _is_xs(value) and (not isinstance(value, XS) or value.amount is None):
+                raise ValueError(
+                    f"Cannot use XS() for {formula!r}; species is not in the environment."
                 )
+            compound.excess = mark_excess
+            self.compounds.append(compound)
+            self.compounds_concentration.append(
+                {"compound": compound, "concentration": resolved_value if resolved_value is not None else 0.0}
+            )
+
+    def _apply_concentration_overrides(self, concentrations, *, allow_pourbaix_reserved=False):
+        """Apply concentration dict; overrides reaction-derived values."""
+        for key, value in concentrations.items():
+            self._set_concentration(
+                key,
+                value,
+                allow_pourbaix_reserved=allow_pourbaix_reserved,
+            )
+
+    def set_excess(self, concentrations) -> None:
+        """
+        Set concentrations and mark species as excess (fixed activity).
+
+        Values may be numeric (mol/L) or :data:`XS` to keep the current amount and
+        only set ``Compound.excess = True``.
+
+        Example::
+
+            env.set_excess({"H2O": XS, "CaF2": 10.0})
+        """
+        for key, value in concentrations.items():
+            self._set_concentration(key, value, excess=True)
 
     @classmethod
     def combine(cls, *terms):
@@ -1306,19 +1278,29 @@ class Enviroment():
         for reaction in self.reactions:
             for compound in reaction.compounds:
                 compounds = [i["compound"] for i in self.compounds_concentration]
+                index_in_reaction = reaction.compounds.index(compound)
+                entry_excess = compound.get("excess", False)
                 if compound["compound"] in compounds:
                     index_in_compounds_concentration = compounds.index(compound["compound"])
-                    index_in_reaction = reaction.compounds.index(compound)
                     self.compounds_concentration[index_in_compounds_concentration]["concentration"] += reaction.compounds[index_in_reaction]["concentration"]
+                    if entry_excess:
+                        self.compounds[index_in_compounds_concentration].excess = True
                 else:
-                    index_in_reaction = reaction.compounds.index(compound)
                     self.compounds_concentration.append(
                         {
                             "compound": compound["compound"],
                             "concentration": reaction.compounds[index_in_reaction]["concentration"],
                         }
                     )
-                    self.compounds.append(compound["compound"])
+                    appended = compound["compound"]
+                    if entry_excess:
+                        appended.excess = True
+                    self.compounds.append(appended)
+
+        for entry in self.compounds_concentration:
+            compound = entry["compound"]
+            if compound.charge != 0 and compound.formula not in self.charge_map:
+                self.charge_map[compound.formula] = compound.charge
 
     @property
     def reaction_by_index(self):

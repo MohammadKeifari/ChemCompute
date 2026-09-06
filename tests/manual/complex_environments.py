@@ -2,300 +2,83 @@
 
 from __future__ import annotations
 
-from ChemCompute import Compound, Enviroment, Reaction
+from ChemCompute import Enviroment, Reaction, XS
 
 T = 298
 
 
-def _aq(name: str, **kwargs) -> Compound:
-    return Compound(name, phase_point_list=[{"phase": "aq", "temperature": T}], **kwargs)
-
-
-def _solid(name: str, *, excess: bool = False) -> Compound:
-    return Compound(name, phase_point_list=[{"phase": "s", "temperature": T}], excess=excess)
-
-
-def _liquid(name: str, *, excess: bool = False) -> Compound:
-    return Compound(name, phase_point_list=[{"phase": "l", "temperature": T}], excess=excess)
+def _rxn(reaction_str: str, concentrations: dict, **kwargs) -> Reaction:
+    return Reaction.from_string(reaction_str, concentrations=concentrations, T=T, **kwargs)
 
 
 def build_env16() -> Enviroment:
     """HF fluoride speciation in 0.06 M HCl with excess CaF2(s) and H2O(l)."""
-    hf = _aq("HF")
-    fm = _aq("F-")
-    hf2 = _aq("HF2-")
-    h2f2 = _aq("H2F2")
-    hp = _aq("H+")
-    ohm = _aq("OH-")
-    ca2 = _aq("Ca+2")
-    hcl = _aq("HCl")
-    clm = _aq("Cl-")
-    h2o = _liquid("H2O", excess=True)
-    caf2 = _solid("CaF2", excess=True)
-
     return Enviroment(
-        Reaction(
-            [
-                {"stoichiometric_coefficient": 1, "compound": hf, "rate_dependency": 1},
-                {"stoichiometric_coefficient": 1, "compound": fm, "rate_dependency": 1},
-            ],
-            [{"stoichiometric_coefficient": 1, "compound": hf2, "rate_dependency": 1}],
-            [0.0, 0.0],
-            [0.0],
-            K=0.1,
-        ),
-        Reaction(
-            [{"stoichiometric_coefficient": 2, "compound": hf, "rate_dependency": 2}],
-            [{"stoichiometric_coefficient": 1, "compound": h2f2, "rate_dependency": 1}],
-            [0.0],
-            [0.0],
-            K=0.5,
-        ),
-        Reaction(
-            [{"stoichiometric_coefficient": 1, "compound": hf, "rate_dependency": 1}],
-            [
-                {"stoichiometric_coefficient": 1, "compound": hp, "rate_dependency": 1},
-                {"stoichiometric_coefficient": 1, "compound": fm, "rate_dependency": 1},
-            ],
-            [0.0],
-            [0.0, 0.0],
-            K=10 ** (-2.93),
-        ),
-        Reaction(
-            [{"stoichiometric_coefficient": 1, "compound": h2o, "rate_dependency": 1}],
-            [
-                {"stoichiometric_coefficient": 1, "compound": ohm, "rate_dependency": 1},
-                {"stoichiometric_coefficient": 1, "compound": hp, "rate_dependency": 1},
-            ],
-            [55.5],
-            [1e-14 / 0.06, 0.0],
+        _rxn("HF.aq & F-.aq > HF2-.aq", {}, K=0.1),
+        _rxn("2_HF.aq > H2F2.aq", {}, K=0.5),
+        _rxn("HF.aq > H+ & F-", {}, K=10 ** (-2.93)),
+        _rxn(
+            "H2O.l > H+ & OH-",
+            {"H2O": XS(55.5), "H+": 1e-14 / 0.06},
             K=1e-14,
         ),
-        Reaction(
-            [{"stoichiometric_coefficient": 1, "compound": caf2, "rate_dependency": 1}],
-            [
-                {"stoichiometric_coefficient": 1, "compound": ca2, "rate_dependency": 1},
-                {"stoichiometric_coefficient": 2, "compound": fm, "rate_dependency": 2},
-            ],
-            [10.0],
-            [0.0, 0.0],
-            K=5e-9,
-        ),
-        Reaction(
-            [{"stoichiometric_coefficient": 1, "compound": hcl, "rate_dependency": 1}],
-            [
-                {"stoichiometric_coefficient": 1, "compound": hp, "rate_dependency": 1},
-                {"stoichiometric_coefficient": 1, "compound": clm, "rate_dependency": 1},
-            ],
-            [0.06],
-            [0.0, 0.0],
-            infinite_K=True,
-        ),
+        _rxn("CaF2.s > Ca+2 & 2_F-", {"CaF2": XS(10.0)}, K=5e-9),
+        _rxn("HCl.aq > H+ & Cl-", {"HCl": 0.06}, K=1.0, infinite_K=True),
         T=T,
     )
 
 
 def build_env17() -> Enviroment:
     """Carbonate system with excess CaCO3(s), 0.01 M HCl (infinite K)."""
-    caco3 = _solid("CaCO3", excess=True)
-    ca2 = _aq("Ca+2")
-    co3 = _aq("CO3-2")
-    hco3 = _aq("HCO3-")
-    hp = _aq("H+")
-    ohm = _aq("OH-")
-    h2o = _liquid("H2O", excess=True)
-    hcl = _aq("HCl")
-    clm = _aq("Cl-")
-
     return Enviroment(
-        Reaction(
-            [{"stoichiometric_coefficient": 1, "compound": caco3, "rate_dependency": 1}],
-            [
-                {"stoichiometric_coefficient": 1, "compound": ca2, "rate_dependency": 1},
-                {"stoichiometric_coefficient": 1, "compound": co3, "rate_dependency": 1},
-            ],
-            [5.0],
-            [0.0, 0.0],
-            K=4.7e-9,
-        ),
-        Reaction(
-            [
-                {"stoichiometric_coefficient": 1, "compound": hp, "rate_dependency": 1},
-                {"stoichiometric_coefficient": 1, "compound": co3, "rate_dependency": 1},
-            ],
-            [{"stoichiometric_coefficient": 1, "compound": hco3, "rate_dependency": 1}],
-            [0.0, 0.0],
-            [0.0],
-            K=1 / (4.7e-11),
-        ),
-        Reaction(
-            [{"stoichiometric_coefficient": 1, "compound": h2o, "rate_dependency": 1}],
-            [
-                {"stoichiometric_coefficient": 1, "compound": hp, "rate_dependency": 1},
-                {"stoichiometric_coefficient": 1, "compound": ohm, "rate_dependency": 1},
-            ],
-            [55.5],
-            [0.0, 1e-14 / 0.01],
+        _rxn("CaCO3.s > Ca+2 & CO3-2", {"CaCO3": XS(5.0)}, K=4.7e-9),
+        _rxn("H+ & CO3-2 > HCO3-", {}, K=1 / (4.7e-11)),
+        _rxn(
+            "H2O.l > H+ & OH-",
+            {"H2O": XS(55.5), "OH-": 1e-14 / 0.01},
             K=1e-14,
         ),
-        Reaction(
-            [{"stoichiometric_coefficient": 1, "compound": hcl, "rate_dependency": 1}],
-            [
-                {"stoichiometric_coefficient": 1, "compound": hp, "rate_dependency": 1},
-                {"stoichiometric_coefficient": 1, "compound": clm, "rate_dependency": 1},
-            ],
-            [0.01],
-            [0.0, 0.0],
-            infinite_K=True,
-        ),
+        _rxn("HCl.aq > H+ & Cl-", {"HCl": 0.01}, K=1.0, infinite_K=True),
         T=T,
     )
 
 
 def build_env18() -> Enviroment:
     """Ammonia buffer, AgCl(s) precipitation, and HCl dissociation (infinite K)."""
-    nh4 = _aq("NH4+")
-    hp = _aq("H+")
-    nh3 = _aq("NH3")
-    ag = _aq("Ag+")
-    clm = _aq("Cl-")
-    agcl = _solid("AgCl")
-    hcl = _aq("HCl")
-
     return Enviroment(
-        Reaction(
-            [{"stoichiometric_coefficient": 1, "compound": nh4, "rate_dependency": 1}],
-            [
-                {"stoichiometric_coefficient": 1, "compound": hp, "rate_dependency": 1},
-                {"stoichiometric_coefficient": 1, "compound": nh3, "rate_dependency": 1},
-            ],
-            [0.1],
-            [0.0, 0.01],
-            K=5.6e-10,
-        ),
-        Reaction(
-            [
-                {"stoichiometric_coefficient": 1, "compound": ag, "rate_dependency": 1},
-                {"stoichiometric_coefficient": 1, "compound": clm, "rate_dependency": 1},
-            ],
-            [{"stoichiometric_coefficient": 1, "compound": agcl, "rate_dependency": 1}],
-            [0.01, 0.05],
-            [0.0],
-            infinite_K=True,
-        ),
-        Reaction(
-            [{"stoichiometric_coefficient": 1, "compound": hcl, "rate_dependency": 1}],
-            [
-                {"stoichiometric_coefficient": 1, "compound": hp, "rate_dependency": 1},
-                {"stoichiometric_coefficient": 1, "compound": clm, "rate_dependency": 1},
-            ],
-            [0.05],
-            [0.0, 0.0],
-            infinite_K=True,
-        ),
+        _rxn("NH4+ > H+ & NH3", {"NH4+": 0.1, "NH3": 0.01}, K=5.6e-10),
+        _rxn("Ag+ & Cl- > AgCl.s", {"Ag+": 0.01, "Cl-": 0.05}, K=1.0, infinite_K=True),
+        _rxn("HCl.aq > H+ & Cl-", {"HCl": 0.05}, K=1.0, infinite_K=True),
         T=T,
     )
 
 
 def build_env19() -> Enviroment:
     """Phosphate buffer with CaHPO4(s) precipitation and excess solid."""
-    h3po4 = _aq("H3PO4")
-    h2po4 = _aq("H2PO4-")
-    hpo4 = _aq("HPO4-2")
-    ca2 = _aq("Ca+2")
-    cahpo4 = _solid("CaHPO4", excess=True)
-    hp = _aq("H+")
-    ohm = _aq("OH-")
-    h2o = _liquid("H2O", excess=True)
-
     return Enviroment(
-        Reaction(
-            [{"stoichiometric_coefficient": 1, "compound": h3po4, "rate_dependency": 1}],
-            [
-                {"stoichiometric_coefficient": 1, "compound": hp, "rate_dependency": 1},
-                {"stoichiometric_coefficient": 1, "compound": h2po4, "rate_dependency": 1},
-            ],
-            [0.01],
-            [0.0, 0.0],
-            K=7.5e-3,
-        ),
-        Reaction(
-            [{"stoichiometric_coefficient": 1, "compound": h2po4, "rate_dependency": 1}],
-            [
-                {"stoichiometric_coefficient": 1, "compound": hp, "rate_dependency": 1},
-                {"stoichiometric_coefficient": 1, "compound": hpo4, "rate_dependency": 1},
-            ],
-            [0.0],
-            [0.0, 0.0],
-            K=6.2e-8,
-        ),
-        Reaction(
-            [
-                {"stoichiometric_coefficient": 1, "compound": ca2, "rate_dependency": 1},
-                {"stoichiometric_coefficient": 1, "compound": hpo4, "rate_dependency": 1},
-            ],
-            [{"stoichiometric_coefficient": 1, "compound": cahpo4, "rate_dependency": 1}],
-            [0.02, 0.0],
-            [1.0],
+        _rxn("H3PO4 > H+ & H2PO4-", {"H3PO4": 0.01}, K=7.5e-3),
+        _rxn("H2PO4- > H+ & HPO4-2", {}, K=6.2e-8),
+        _rxn(
+            "Ca+2 & HPO4-2 > CaHPO4.s",
+            {"Ca+2": 0.02, "CaHPO4": XS(1.0)},
             K=1e5,
         ),
-        Reaction(
-            [{"stoichiometric_coefficient": 1, "compound": h2o, "rate_dependency": 1}],
-            [
-                {"stoichiometric_coefficient": 1, "compound": hp, "rate_dependency": 1},
-                {"stoichiometric_coefficient": 1, "compound": ohm, "rate_dependency": 1},
-            ],
-            [55.5],
-            [1e-7, 1e-7],
-            K=1e-14,
-        ),
+        _rxn("H2O.l > H+ & OH-", {"H2O": XS(55.5), "H+": 1e-7, "OH-": 1e-7}, K=1e-14),
         T=T,
     )
 
 
 def build_env20() -> Enviroment:
     """Cu-EDTA complexation (infinite K), NaCl dissociation, water autoionization."""
-    cu = _aq("Cu+2")
-    edta = _aq("EDTA-4")
-    cuedta = _aq("CuEDTA-2")
-    ohm = _aq("OH-")
-    nacl = _aq("NaCl")
-    na = _aq("Na+")
-    clm = _aq("Cl-")
-    hp = _aq("H+")
-    h2o = _liquid("H2O", excess=True)
-
     return Enviroment(
-        Reaction(
-            [
-                {"stoichiometric_coefficient": 1, "compound": cu, "rate_dependency": 1},
-                {"stoichiometric_coefficient": 1, "compound": edta, "rate_dependency": 1},
-            ],
-            [{"stoichiometric_coefficient": 1, "compound": cuedta, "rate_dependency": 1}],
-            [0.005, 0.01],
-            [0.0],
+        _rxn(
+            "Cu+2 & EDTA-4 > CuEDTA-2",
+            {"Cu+2": 0.005, "EDTA-4": 0.01},
+            K=1.0,
             infinite_K=True,
         ),
-        Reaction(
-            [{"stoichiometric_coefficient": 1, "compound": nacl, "rate_dependency": 1}],
-            [
-                {"stoichiometric_coefficient": 1, "compound": na, "rate_dependency": 1},
-                {"stoichiometric_coefficient": 1, "compound": clm, "rate_dependency": 1},
-            ],
-            [0.1],
-            [0.0, 0.0],
-            infinite_K=True,
-        ),
-        Reaction(
-            [{"stoichiometric_coefficient": 1, "compound": h2o, "rate_dependency": 1}],
-            [
-                {"stoichiometric_coefficient": 1, "compound": hp, "rate_dependency": 1},
-                {"stoichiometric_coefficient": 1, "compound": ohm, "rate_dependency": 1},
-            ],
-            [55.5],
-            [1e-7, 1e-7],
-            K=1e-14,
-        ),
+        _rxn("NaCl.aq > Na+ & Cl-", {"NaCl": 0.1}, K=1.0, infinite_K=True),
+        _rxn("H2O.l > H+ & OH-", {"H2O": XS(55.5), "H+": 1e-7, "OH-": 1e-7}, K=1e-14),
         T=T,
     )
 

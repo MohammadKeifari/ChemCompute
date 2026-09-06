@@ -78,14 +78,14 @@ ethanol = Compound("C2H5OH", mp=-114, bp=78)
 
 ### ⚗️ Reaction Definition
 
-Define reactions using simple or complex syntax with thermodynamic parameters:
+Define reactions using string notation with thermodynamic parameters:
 
 ```python
 from ChemCompute import Reaction
 
-# Simple syntax with thermodynamic parameters
-rxn = Reaction.from_string_simple_syntax(
-    "2A + B > 3C",
+# String notation with thermodynamic parameters
+rxn = Reaction.from_string(
+    "2_A & B > 3_C",
     concentrations=[1.0, 1.0, 0.0],
     K=10.0,
     kf=0.5,
@@ -103,7 +103,7 @@ Automatically update rate constants and equilibrium constants with temperature:
 
 ```python
 # Create reaction with thermodynamic parameters
-rxn = Reaction.from_string_simple_syntax(
+rxn = Reaction.from_string(
     "A > B",
     K=2.0,
     kf=0.5,
@@ -180,7 +180,7 @@ Here's a complete example to get you started:
 from ChemCompute import Compound, Reaction, Enviroment
 
 # Create a simple reversible reaction: A ⇌ B
-rxn = Reaction.from_string_simple_syntax(
+rxn = Reaction.from_string(
     "A > B",
     concentrations=[1.0, 0.0],
     K=2.0,

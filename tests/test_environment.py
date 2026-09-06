@@ -40,7 +40,7 @@ def simple_equilibrium_environment():
 
 @pytest.fixture
 def simple_kinetic_environment():
-    rxn = Reaction.from_string_simple_syntax(
+    rxn = Reaction.from_string(
         "A > B",
         concentrations=[1.0, 0.0],
         K=2.0,
@@ -432,6 +432,110 @@ def test_excess_compound_concentration_fixed_during_equilibrium():
     assert result.concentrations_dict["H2O"] == 55.5
 
 
+def test_reaction_from_string_infinite_k():
+    rxn = Reaction.from_string(
+        "HCl.aq > H+ & Cl-",
+        concentrations=[0.06, 0.0, 0.0],
+        infinite_K=True,
+    )
+    assert rxn.infinite_K is True
+
+    env = Enviroment(rxn, T=298)
+    result = env.equilibrium(method="newton", tol=1e-12, return_details=True)
+    assert result.concentrations_dict["HCl"] == pytest.approx(0.0, abs=1e-9)
+    assert result.concentrations_dict["H+"] == pytest.approx(0.06, rel=1e-4)
+
+
+def test_set_excess_with_xs_keeps_concentration():
+    from ChemCompute import XS
+
+    rxn = Reaction.from_string(
+        "H2O.l > H+ & OH-",
+        concentrations=[55.5, 1e-7, 1e-7],
+        K=1e-14,
+    )
+    env = Enviroment(rxn, T=298)
+    env.set_excess({"H2O": XS()})
+
+    assert rxn.compounds[0]["excess"] is False
+    assert env.compounds[0].excess is True
+    assert env.concentrations_dict["H2O"] == 55.5
+
+    result = env.equilibrium(method="newton", tol=1e-12, return_details=True)
+    assert result.concentrations_dict["H2O"] == 55.5
+
+
+def test_reaction_concentrations_dict_defaults_missing_to_zero():
+    rxn = Reaction.from_string(
+        "HA.aq > H+ & A-",
+        concentrations={"HA": 0.1},
+        K=1e-5,
+    )
+    assert rxn.compounds[0]["concentration"] == 0.1
+    assert rxn.compounds[1]["concentration"] == 0.0
+    assert rxn.compounds[2]["concentration"] == 0.0
+
+
+def test_reaction_concentrations_dict_xs_marks_excess_on_entry():
+    from ChemCompute import XS
+
+    rxn = Reaction.from_string(
+        "H2O.l > H+ & OH-",
+        concentrations={"H2O": XS(55.5), "H+": 1e-7, "OH-": 1e-7},
+        K=1e-14,
+    )
+    assert rxn.compounds[0]["excess"] is True
+    assert rxn.compounds[0]["concentration"] == 55.5
+
+    env = Enviroment(rxn, T=298)
+    assert env.compounds[0].excess is True
+    result = env.equilibrium(method="newton", tol=1e-12, return_details=True)
+    assert result.concentrations_dict["H2O"] == 55.5
+
+
+def test_reaction_concentrations_list_xs_marks_excess_on_entry():
+    from ChemCompute import XS
+
+    rxn = Reaction.from_string(
+        "H2O.l > H+ & OH-",
+        concentrations=[XS(55.5), 1e-7, 1e-7],
+        K=1e-14,
+    )
+    assert rxn.compounds[0]["excess"] is True
+    assert rxn.compounds[0]["concentration"] == 55.5
+
+    env = Enviroment(rxn, T=298)
+    assert env.compounds[0].excess is True
+    result = env.equilibrium(method="newton", tol=1e-12, return_details=True)
+    assert result.concentrations_dict["H2O"] == 55.5
+
+
+def test_reaction_concentrations_list_xs_bare_marks_excess():
+    from ChemCompute import XS
+
+    rxn = Reaction.from_string(
+        "CaF2.s > Ca+2 & 2_F-",
+        concentrations=[XS(), 0.0, 0.0],
+        K=5e-9,
+    )
+    assert rxn.compounds[0]["excess"] is True
+    assert rxn.compounds[0]["concentration"] == 0.0
+
+
+def test_concentrations_dict_accepts_xs_at_init():
+    from ChemCompute import XS
+
+    rxn = Reaction.from_string(
+        "CaF2.s > Ca+2 & 2_F-",
+        concentrations={"CaF2": XS(10.0)},
+        K=5e-9,
+    )
+    env = Enviroment(rxn, T=298)
+    assert rxn.compounds[0]["excess"] is True
+    assert env.compounds[0].excess is True
+    assert env.concentrations_dict["CaF2"] == 10.0
+
+
 def test_infinite_k_drives_strong_acid_dissociation():
     hcl = Compound("HCl", phase_point_list=[{"phase": "aq", "temperature": 298}])
     hp = Compound("H+", phase_point_list=[{"phase": "aq", "temperature": 298}])
@@ -590,7 +694,7 @@ class TestStandaloneReaction:
         assert np.allclose(direct, wrapped)
 
     def test_kinetics_runs(self):
-        rxn = Reaction.from_string_simple_syntax(
+        rxn = Reaction.from_string(
             "A > B",
             [1.0, 0.0],
             K=2.0,
@@ -948,8 +1052,8 @@ def test_undetermined_phase_stays_in_quotient():
 def test_half_reaction_string_concentrations_and_e_at():
     from ChemCompute import HalfReaction
 
-    hr = HalfReaction.from_string_simple_syntax(
-        "Fe+3 + @e = Fe+2",
+    hr = HalfReaction.from_string(
+        "Fe+3 & @e = Fe+2",
         concentrations=[0.01, 0.001],
         E0=0.771,
     )
@@ -962,8 +1066,8 @@ def test_half_reaction_string_concentrations_and_e_at():
 def test_half_reaction_complex_syntax_and_h_plus_slope():
     from ChemCompute import HalfReaction
 
-    hr = HalfReaction.from_string_complex_syntax(
-        "Fe(OH)3.s & 3_H+ + @e = Fe+2 & 3_H2O.l",
+    hr = HalfReaction.from_string(
+        "Fe(OH)3.s & 3_H+ & @e = Fe+2 & 3_H2O.l",
         concentrations=[1.0, 1e-7, 0.05, 1.0],
         E0=-0.55,
     )
@@ -986,8 +1090,8 @@ def test_reaction_rejects_electron_formula():
 def test_env_mixed_reaction_and_half_reaction_constructor():
     from ChemCompute import HalfReaction
 
-    hr = HalfReaction.from_string_simple_syntax(
-        "Fe+3 + @e = Fe+2",
+    hr = HalfReaction.from_string(
+        "Fe+3 & @e = Fe+2",
         concentrations=[0.01, 0.001],
         E0=0.771,
     )
@@ -999,8 +1103,8 @@ def test_env_mixed_reaction_and_half_reaction_constructor():
 def test_fixed_electrode_potential_equilibrium():
     from ChemCompute import HalfReaction
 
-    hr = HalfReaction.from_string_simple_syntax(
-        "Fe+3 + @e = Fe+2",
+    hr = HalfReaction.from_string(
+        "Fe+3 & @e = Fe+2",
         concentrations=[0.01, 0.001],
         E0=0.771,
     )
@@ -1014,13 +1118,13 @@ def test_fixed_electrode_potential_equilibrium():
 def test_coupled_electrode_potential_two_half_reactions():
     from ChemCompute import HalfReaction
 
-    hr_fe = HalfReaction.from_string_simple_syntax(
-        "Fe+3 + @e = Fe+2",
+    hr_fe = HalfReaction.from_string(
+        "Fe+3 & @e = Fe+2",
         concentrations=[0.01, 0.001],
         E0=0.771,
     )
-    hr_ce = HalfReaction.from_string_simple_syntax(
-        "Ce+4 + @e = Ce+3",
+    hr_ce = HalfReaction.from_string(
+        "Ce+4 & @e = Ce+3",
         concentrations=[0.01, 0.001],
         E0=1.72,
     )
@@ -1033,8 +1137,8 @@ def test_coupled_electrode_potential_two_half_reactions():
 def test_duplicate_half_reaction_registration_raises():
     from ChemCompute import HalfReaction
 
-    hr1 = HalfReaction.from_string_simple_syntax("Fe+3 + @e = Fe+2", E0=0.771)
-    hr2 = HalfReaction.from_string_simple_syntax("Fe+3 + @e = Fe+2", E0=0.5)
+    hr1 = HalfReaction.from_string("Fe+3 & @e = Fe+2", E0=0.771)
+    hr2 = HalfReaction.from_string("Fe+3 & @e = Fe+2", E0=0.5)
     env = Enviroment()
     env.register_half_reactions([hr1])
     with pytest.raises(ValueError, match="Duplicate"):
@@ -1045,9 +1149,9 @@ def test_kinetics_warns_when_half_reactions_present():
     from ChemCompute import HalfReaction
     import warnings
 
-    hr = HalfReaction.from_string_simple_syntax("Fe+3 + @e = Fe+2", E0=0.771)
+    hr = HalfReaction.from_string("Fe+3 & @e = Fe+2", E0=0.771)
     env = Enviroment(
-        Reaction.from_string_simple_syntax("A > B", concentrations=[1.0, 0.0], K=1.0),
+        Reaction.from_string("A > B", concentrations=[1.0, 0.0], K=1.0),
         hr,
     )
     with warnings.catch_warnings(record=True) as caught:
@@ -1059,8 +1163,8 @@ def test_kinetics_warns_when_half_reactions_present():
 def test_copy_preserves_half_reactions_and_electrode_eh():
     from ChemCompute import HalfReaction
 
-    hr = HalfReaction.from_string_simple_syntax(
-        "Fe+3 + @e = Fe+2",
+    hr = HalfReaction.from_string(
+        "Fe+3 & @e = Fe+2",
         concentrations=[0.01, 0.001],
         E0=0.771,
     )
@@ -1074,8 +1178,8 @@ def test_copy_preserves_half_reactions_and_electrode_eh():
 def test_pourbaix_grid_run():
     from ChemCompute import HalfReaction, Pourbaix
 
-    hr = HalfReaction.from_string_simple_syntax(
-        "Fe+3 + @e = Fe+2",
+    hr = HalfReaction.from_string(
+        "Fe+3 & @e = Fe+2",
         concentrations=[0.01, 0.001],
         E0=0.771,
     )

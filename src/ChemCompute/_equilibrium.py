@@ -187,9 +187,9 @@ def _build_context(env, min_concentration: float) -> EquilibriumContext:
     infinite_k_mask = np.array([getattr(rxn, "infinite_K", False) for rxn in env.reactions], dtype=bool)
     excess_source_mask = np.zeros(R, dtype=bool)
     for i, rxn in enumerate(env.reactions):
-        for reactant in rxn.reactants:
-            compound = reactant["compound"]
-            if getattr(compound, "excess", False):
+        for species in rxn.reactants + rxn.products:
+            compound = species["compound"]
+            if species.get("excess", False) or getattr(compound, "excess", False):
                 excess_source_mask[i] = True
                 break
 
@@ -201,6 +201,11 @@ def _build_context(env, min_concentration: float) -> EquilibriumContext:
             A[:, j] = 0.0
         if getattr(compound, "excess", False):
             S[j, :] = 0.0
+        for rxn in env.reactions:
+            for species in rxn.reactants + rxn.products:
+                if species["compound"] is compound and species.get("excess", False):
+                    S[j, :] = 0.0
+                    break
 
     for j in getattr(env, "buffer_indices", []):
         S[j, :] = 0.0

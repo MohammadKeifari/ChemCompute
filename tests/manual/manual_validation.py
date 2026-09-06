@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ChemCompute import Compound, Enviroment, EquilibriumResult, Reaction
+from ChemCompute import Enviroment, EquilibriumResult, Reaction
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from complex_environments import (
@@ -57,7 +57,7 @@ class ManualCase:
 
 # env1: simple reversible reaction, batch gradient descent, log_quotient loss
 env1 = Enviroment(
-    Reaction.from_string_simple_syntax(
+    Reaction.from_string(
         "A.g > B.g",
         concentrations=[1.0, 0.0],
         K=2.0,
@@ -68,40 +68,17 @@ env1 = Enviroment(
 )
 
 # env2: coupled network A ⇌ B ⇌ C, stochastic gradient descent
-A2, B2, C2 = Compound("A"), Compound("B"), Compound("C")
 env2 = Enviroment(
-    Reaction(
-        [{"stoichiometric_coefficient": 1, "compound": A2, "rate_dependency": 1}],
-        [{"stoichiometric_coefficient": 1, "compound": B2, "rate_dependency": 1}],
-        [1.0],
-        [0.0],
-        K=2.0,
-        kf=0.5,
-        kb=0.25,
-    ),
-    Reaction(
-        [{"stoichiometric_coefficient": 1, "compound": B2, "rate_dependency": 1}],
-        [{"stoichiometric_coefficient": 1, "compound": C2, "rate_dependency": 1}],
-        [0.0],
-        [0.0],
-        K=1.5,
-        kf=0.3,
-        kb=0.2,
-    ),
+    Reaction.from_string("A > B", concentrations=[1.0, 0.0], K=2.0, kf=0.5, kb=0.25),
+    Reaction.from_string("B > C", concentrations=[0.0, 0.0], K=1.5, kf=0.3, kb=0.2),
     T=298,
 )
 
 # env3: non-unity stoichiometry A + 2B ⇌ C
-A3, B3, C3 = Compound("A"), Compound("B"), Compound("C")
 env3 = Enviroment(
-    Reaction(
-        [
-            {"stoichiometric_coefficient": 1, "compound": A3, "rate_dependency": 1},
-            {"stoichiometric_coefficient": 2, "compound": B3, "rate_dependency": 2},
-        ],
-        [{"stoichiometric_coefficient": 1, "compound": C3, "rate_dependency": 1}],
-        [1.0, 2.0],
-        [0.0],
+    Reaction.from_string(
+        "A & 2_B_2 > C",
+        concentrations=[1.0, 2.0, 0.0],
         K=10.0,
         kf=0.5,
         kb=0.05,
@@ -110,18 +87,10 @@ env3 = Enviroment(
 )
 
 # env4: phase handling (gas reactant, liquid/solid products excluded from Q)
-A4 = Compound("A", phase_point_list=[{"phase": "g", "temperature": 298}])
-B4 = Compound("B", phase_point_list=[{"phase": "l", "temperature": 298}])
-C4 = Compound("C", phase_point_list=[{"phase": "s", "temperature": 298}])
 env4 = Enviroment(
-    Reaction(
-        [{"stoichiometric_coefficient": 1, "compound": A4, "rate_dependency": 1}],
-        [
-            {"stoichiometric_coefficient": 1, "compound": B4, "rate_dependency": 1},
-            {"stoichiometric_coefficient": 1, "compound": C4, "rate_dependency": 1},
-        ],
-        [1.0],
-        [0.0, 0.0],
+    Reaction.from_string(
+        "A.g > B.l & C.s",
+        concentrations=[1.0, 0.0, 0.0],
         K=5.0,
         kf=0.3,
         kb=0.06,
@@ -131,7 +100,7 @@ env4 = Enviroment(
 
 # env5: temperature-dependent equilibrium (van't Hoff / Arrhenius)
 env5 = Enviroment(
-    Reaction.from_string_simple_syntax(
+    Reaction.from_string(
         "A > B",
         concentrations=[1.0, 0.0],
         K=2.0,
@@ -146,7 +115,7 @@ env5 = Enviroment(
 
 # env6: Newton's method on a simple system
 env6 = Enviroment(
-    Reaction.from_string_simple_syntax(
+    Reaction.from_string(
         "A > B",
         concentrations=[2.0, 1.0],
         K=2.0,
@@ -158,7 +127,7 @@ env6 = Enviroment(
 
 # env7: quotient_error loss function
 env7 = Enviroment(
-    Reaction.from_string_simple_syntax(
+    Reaction.from_string(
         "A > B",
         concentrations=[1.0, 0.0],
         K=4.0,
@@ -170,7 +139,7 @@ env7 = Enviroment(
 
 # env8: log_huber loss function
 env8 = Enviroment(
-    Reaction.from_string_simple_syntax(
+    Reaction.from_string(
         "A > B",
         concentrations=[1.0, 0.0],
         K=0.5,
@@ -182,7 +151,7 @@ env8 = Enviroment(
 
 # env9: quotient_error_limit stopping criterion
 env9 = Enviroment(
-    Reaction.from_string_simple_syntax(
+    Reaction.from_string(
         "A > B",
         concentrations=[1.0, 0.0],
         K=2.0,
@@ -192,16 +161,16 @@ env9 = Enviroment(
     T=298,
 )
 
-# env10: complex syntax, aqueous phase, multi-reaction system
+# env10: aqueous multi-reaction system
 env10 = Enviroment(
-    Reaction.from_string_complex_syntax(
+    Reaction.from_string(
         "A.aq & 2_B.aq > C.aq",
         concentrations=[1.0, 1.0, 0.0],
         K=3.0,
         kf=0.4,
         kb=0.13333333333333333,
     ),
-    Reaction.from_string_simple_syntax(
+    Reaction.from_string(
         "C.aq > D.aq",
         concentrations=[0.0, 0.0],
         K=1.2,
@@ -213,14 +182,9 @@ env10 = Enviroment(
 
 # env11: weak acid dissociation with trace H+ (1e-8) and A- (1e-9)
 env11 = Enviroment(
-    Reaction(
-        [{"stoichiometric_coefficient": 1, "compound": Compound("HA", phase_point_list=[{"phase": "aq", "temperature": 298}]), "rate_dependency": 1}],
-        [
-            {"stoichiometric_coefficient": 1, "compound": Compound("H+", phase_point_list=[{"phase": "aq", "temperature": 298}]), "rate_dependency": 1},
-            {"stoichiometric_coefficient": 1, "compound": Compound("A-", phase_point_list=[{"phase": "aq", "temperature": 298}]), "rate_dependency": 1},
-        ],
-        [0.1],
-        [1e-8, 1e-9],
+    Reaction.from_string(
+        "HA.aq > H+ & A-",
+        concentrations=[0.1, 1e-8, 1e-9],
         K=1e-5,
         kf=1.0,
         kb=1e5,
@@ -230,14 +194,9 @@ env11 = Enviroment(
 
 # env12: acid-base neutralization H+(aq) + OH-(aq) -> H2O(l), trace ions
 env12 = Enviroment(
-    Reaction(
-        [
-            {"stoichiometric_coefficient": 1, "compound": Compound("H+", phase_point_list=[{"phase": "aq", "temperature": 298}]), "rate_dependency": 1},
-            {"stoichiometric_coefficient": 1, "compound": Compound("OH-", phase_point_list=[{"phase": "aq", "temperature": 298}]), "rate_dependency": 1},
-        ],
-        [{"stoichiometric_coefficient": 1, "compound": Compound("H2O", phase_point_list=[{"phase": "l", "temperature": 298}]), "rate_dependency": 1}],
-        [1e-7, 1e-8],
-        [55.0],
+    Reaction.from_string(
+        "H+ & OH- > H2O.l",
+        concentrations=[1e-7, 1e-8, 55.0],
         K=1e14,
         kf=1e14,
         kb=1.0,
@@ -247,14 +206,9 @@ env12 = Enviroment(
 
 # env13: precipitation Ag+(aq) + Cl-(aq) -> AgCl(s)
 env13 = Enviroment(
-    Reaction(
-        [
-            {"stoichiometric_coefficient": 1, "compound": Compound("Ag+", phase_point_list=[{"phase": "aq", "temperature": 298}]), "rate_dependency": 1},
-            {"stoichiometric_coefficient": 1, "compound": Compound("Cl-", phase_point_list=[{"phase": "aq", "temperature": 298}]), "rate_dependency": 1},
-        ],
-        [{"stoichiometric_coefficient": 1, "compound": Compound("AgCl", phase_point_list=[{"phase": "s", "temperature": 298}]), "rate_dependency": 1}],
-        [0.05, 0.05],
-        [0.0],
+    Reaction.from_string(
+        "Ag+ & Cl- > AgCl.s",
+        concentrations=[0.05, 0.05, 0.0],
         K=1e4,
         kf=1e4,
         kb=1.0,
@@ -264,14 +218,9 @@ env13 = Enviroment(
 
 # env14: dilute acid (1 mM) with ultra-trace ions (1e-9 / 1e-8)
 env14 = Enviroment(
-    Reaction(
-        [{"stoichiometric_coefficient": 1, "compound": Compound("HA", phase_point_list=[{"phase": "aq", "temperature": 298}]), "rate_dependency": 1}],
-        [
-            {"stoichiometric_coefficient": 1, "compound": Compound("H+", phase_point_list=[{"phase": "aq", "temperature": 298}]), "rate_dependency": 1},
-            {"stoichiometric_coefficient": 1, "compound": Compound("A-", phase_point_list=[{"phase": "aq", "temperature": 298}]), "rate_dependency": 1},
-        ],
-        [1e-3],
-        [1e-9, 1e-8],
+    Reaction.from_string(
+        "HA.aq > H+ & A-",
+        concentrations=[1e-3, 1e-9, 1e-8],
         K=1e-4,
         kf=1.0,
         kb=1e4,
@@ -281,14 +230,9 @@ env14 = Enviroment(
 
 # env15: solid precipitation with pre-existing solid (Ag2CrO4)
 env15 = Enviroment(
-    Reaction(
-        [
-            {"stoichiometric_coefficient": 2, "compound": Compound("Ag+", phase_point_list=[{"phase": "aq", "temperature": 298}]), "rate_dependency": 2},
-            {"stoichiometric_coefficient": 1, "compound": Compound("CrO4-2", phase_point_list=[{"phase": "aq", "temperature": 298}]), "rate_dependency": 1},
-        ],
-        [{"stoichiometric_coefficient": 1, "compound": Compound("Ag2CrO4", phase_point_list=[{"phase": "s", "temperature": 298}]), "rate_dependency": 1}],
-        [0.2, 0.1],
-        [0.5],
+    Reaction.from_string(
+        "2_Ag+_2 & CrO4-2 > Ag2CrO4.s",
+        concentrations=[0.2, 0.1, 0.5],
         K=1e6,
         kf=1e6,
         kb=1.0,
@@ -386,7 +330,7 @@ MANUAL_CASES: list[ManualCase] = [
     ),
     ManualCase(
         name="env10",
-        description="Complex syntax + aqueous multi-reaction network",
+        description="Multi-species aqueous network (from_string)",
         env=env10,
         expected_equilibrium=[
             0.644535045447523,

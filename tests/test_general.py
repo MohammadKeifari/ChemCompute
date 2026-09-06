@@ -137,9 +137,9 @@ def test_reaction_initialization_basic():
     assert any(c["type"] == "product" for c in r.compounds)
 
 
-def test_from_string_simple_syntax_parsing():
-    """Check that a simple reaction string parses correctly."""
-    reaction = Reaction.from_string_simple_syntax("2A.g + B.g2 > C.l-1", [1, 1, 0])
+def test_from_string_parsing():
+    """Check that a reaction string parses correctly."""
+    reaction = Reaction.from_string("2_A.g & B.g2 > C-1.l", [1, 1, 0])
     assert len(reaction.reactants) == 2
     assert len(reaction.products) == 1
     assert isinstance(reaction.reactants[0]["compound"], Compound)
@@ -149,9 +149,9 @@ def test_from_string_simple_syntax_parsing():
     assert "(l)" in str(reaction)
 
 
-def test_from_string_complex_syntax_parsing():
-    """Check that a complex reaction string parses correctly."""
-    reaction = Reaction.from_string_complex_syntax("2_H2_-1 & O2 > 2_H2O_-1", [1, 1, 0])
+def test_from_string_stoichiometry_and_charge():
+    """Check complex-style stoichiometry and charge suffix parsing."""
+    reaction = Reaction.from_string("2_H2_-1 & O2 > 2_H2O_-1", [1, 1, 0])
     assert isinstance(reaction, Reaction)
     assert len(reaction.reactants) == 2  # two reactants: H2 and O2
     assert len(reaction.products) == 1
@@ -159,21 +159,21 @@ def test_from_string_complex_syntax_parsing():
     assert "H2" in reaction.products[0]["compound"].formula
 
 
-def test_invalid_simple_syntax_raises():
+def test_invalid_reaction_string_raises():
     """Ensure invalid reaction strings raise ValueError."""
     with pytest.raises(ValueError):
-        Reaction.from_string_simple_syntax("2H2 + + O2 > H2O")
+        Reaction.from_string("2H2 & & O2 > H2O")
 
 
-def test_invalid_complex_syntax_raises():
-    """Ensure invalid complex syntax raises ValueError."""
+def test_invalid_reaction_string_missing_reactants_raises():
+    """Ensure invalid syntax raises ValueError."""
     with pytest.raises(ValueError):
-        Reaction.from_string_complex_syntax("2H2 & > H2O")
+        Reaction.from_string("2H2 & > H2O")
 
 
 def test_str_and_repr_output():
     """Check readable formatting."""
-    reaction = Reaction.from_string_simple_syntax("A.g + B.g > C.g")
+    reaction = Reaction.from_string("A.g & B.g > C.g")
     text = repr(reaction)
     assert "⇌" in text
     assert "A" in text
@@ -182,8 +182,8 @@ def test_str_and_repr_output():
 
 def test_addition_operator_combines_reactions():
     """Test combining two reactions with + operator."""
-    r1 = Reaction.from_string_simple_syntax("A + B > C")
-    r2 = Reaction.from_string_simple_syntax("2C > B + D")
+    r1 = Reaction.from_string("A & B > C")
+    r2 = Reaction.from_string("2_C > B & D")
     result = r1 + r2
     assert isinstance(result, Reaction)
     assert hasattr(result, "compounds")
@@ -192,8 +192,8 @@ def test_addition_operator_combines_reactions():
 
 def test_iadd_operator_aliases_add():
     """Test in-place addition behaves like +."""
-    r1 = Reaction.from_string_simple_syntax("A + B > C")
-    r2 = Reaction.from_string_simple_syntax("2C > B + D")
+    r1 = Reaction.from_string("A & B > C")
+    r2 = Reaction.from_string("2_C > B & D")
     combined = r1
     combined += r2
     assert isinstance(combined, Reaction)
@@ -202,7 +202,7 @@ def test_iadd_operator_aliases_add():
 
 def test_iteration_over_compounds():
     """Ensure __iter__ yields compound dictionaries."""
-    r = Reaction.from_string_simple_syntax("A.g + B.g > C.l")
+    r = Reaction.from_string("A.g & B.g > C.l")
     for item in r:
         assert "compound" in item
         assert "concentration" in item
@@ -384,9 +384,9 @@ def test_reaction_init_with_thermodynamic_parameters():
     assert rxn.T == 298
 
 
-def test_reaction_from_string_simple_syntax_with_thermodynamic_parameters():
-    """Test creating reaction from simple syntax with thermodynamic parameters."""
-    rxn = Reaction.from_string_simple_syntax(
+def test_reaction_from_string_with_thermodynamic_parameters():
+    """Test creating reaction from string with thermodynamic parameters."""
+    rxn = Reaction.from_string(
         "A > B",
         concentrations=[1.0, 0.0],
         K=2.0,
@@ -406,9 +406,9 @@ def test_reaction_from_string_simple_syntax_with_thermodynamic_parameters():
     assert rxn.T == 298
 
 
-def test_reaction_from_string_complex_syntax_with_thermodynamic_parameters():
-    """Test creating reaction from complex syntax with thermodynamic parameters."""
-    rxn = Reaction.from_string_complex_syntax(
+def test_reaction_from_string_multi_species_thermodynamic_parameters():
+    """Test creating multi-species reaction from string with thermodynamic parameters."""
+    rxn = Reaction.from_string(
         "A & B > C",
         concentrations=[1.0, 1.0, 0.0],
         K=10.0,
