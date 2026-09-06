@@ -1,7 +1,7 @@
 from ._general import *
 from ._equilibrium import EquilibriumResult
 from ._half_reaction import HalfReaction, BoundaryLine
-from ._pourbaix import Pourbaix, PourbaixMetadata, PourbaixResult, infer_pourbaix_metadata
+from ._pourbaix import Pourbaix, PourbaixFrameIntersection, PourbaixMetadata, PourbaixResult, infer_pourbaix_metadata
 from ._pourbaix_graph import (
     PourbaixBoundary,
     PourbaixGraph,

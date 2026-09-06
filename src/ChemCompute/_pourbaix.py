@@ -27,6 +27,163 @@ from ._titration import _find_h_plus_index
 
 BoundaryMode = Literal["dominant", "all"]
 PlotStyle = Literal["filled", "labeled"]
+FrameEdge = Literal["pH_min", "pH_max", "Eh_min", "Eh_max"]
+
+
+@dataclass(frozen=True)
+class PourbaixFrameIntersection:
+    pH: float
+    Eh: float
+    edge: FrameEdge
+
+
+def _point_on_frame(
+    pH: float,
+    Eh: float,
+    pH_min: float,
+    pH_max: float,
+    eh_min: float,
+    eh_max: float,
+    *,
+    tol: float = 1e-9,
+) -> Optional[FrameEdge]:
+    on_ph_min = abs(pH - pH_min) <= tol and eh_min - tol <= Eh <= eh_max + tol
+    on_ph_max = abs(pH - pH_max) <= tol and eh_min - tol <= Eh <= eh_max + tol
+    on_eh_min = abs(Eh - eh_min) <= tol and pH_min - tol <= pH <= pH_max + tol
+    on_eh_max = abs(Eh - eh_max) <= tol and pH_min - tol <= pH <= pH_max + tol
+    hits = [name for flag, name in (
+        (on_ph_min, "pH_min"),
+        (on_ph_max, "pH_max"),
+        (on_eh_min, "Eh_min"),
+        (on_eh_max, "Eh_max"),
+    ) if flag]
+    if not hits:
+        return None
+    return hits[0]  # type: ignore[return-value]
+
+
+def _segment_frame_intersections(
+    pH0: float,
+    eh0: float,
+    pH1: float,
+    eh1: float,
+    pH_min: float,
+    pH_max: float,
+    eh_min: float,
+    eh_max: float,
+) -> list[PourbaixFrameIntersection]:
+    points: list[PourbaixFrameIntersection] = []
+    dpH = pH1 - pH0
+    dEh = eh1 - eh0
+
+    for edge, value, axis in (
+        ("pH_min", pH_min, "pH"),
+        ("pH_max", pH_max, "pH"),
+        ("Eh_min", eh_min, "Eh"),
+        ("Eh_max", eh_max, "Eh"),
+    ):
+        if axis == "pH":
+            if abs(dpH) < 1e-15:
+                if abs(pH0 - value) <= 1e-9:
+                    for eh in (eh0, eh1):
+                        if eh_min - 1e-9 <= eh <= eh_max + 1e-9:
+                            points.append(PourbaixFrameIntersection(pH=value, Eh=float(eh), edge=edge))  # type: ignore[arg-type]
+                continue
+            t = (value - pH0) / dpH
+            if -1e-9 <= t <= 1.0 + 1e-9:
+                t = float(np.clip(t, 0.0, 1.0))
+                eh = eh0 + t * dEh
+                if eh_min - 1e-9 <= eh <= eh_max + 1e-9:
+                    points.append(PourbaixFrameIntersection(pH=value, Eh=float(eh), edge=edge))  # type: ignore[arg-type]
+        else:
+            if abs(dEh) < 1e-15:
+                if abs(eh0 - value) <= 1e-9:
+                    for pH in (pH0, pH1):
+                        if pH_min - 1e-9 <= pH <= pH_max + 1e-9:
+                            points.append(PourbaixFrameIntersection(pH=float(pH), Eh=value, edge=edge))  # type: ignore[arg-type]
+                continue
+            t = (value - eh0) / dEh
+            if -1e-9 <= t <= 1.0 + 1e-9:
+                t = float(np.clip(t, 0.0, 1.0))
+                pH = pH0 + t * dpH
+                if pH_min - 1e-9 <= pH <= pH_max + 1e-9:
+                    points.append(PourbaixFrameIntersection(pH=float(pH), Eh=value, edge=edge))  # type: ignore[arg-type]
+    return points
+
+
+def _polyline_frame_intersections(
+    pH_line: np.ndarray,
+    eh_line: np.ndarray,
+    pH_min: float,
+    pH_max: float,
+    eh_min: float,
+    eh_max: float,
+) -> list[PourbaixFrameIntersection]:
+    if len(pH_line) == 0:
+        return []
+    points: list[PourbaixFrameIntersection] = []
+    for index in range(len(pH_line)):
+        pH = float(pH_line[index])
+        eh = float(eh_line[index])
+        edge = _point_on_frame(pH, eh, pH_min, pH_max, eh_min, eh_max)
+        if edge is not None:
+            points.append(PourbaixFrameIntersection(pH=pH, Eh=eh, edge=edge))
+    for index in range(len(pH_line) - 1):
+        points.extend(
+            _segment_frame_intersections(
+                float(pH_line[index]),
+                float(eh_line[index]),
+                float(pH_line[index + 1]),
+                float(eh_line[index + 1]),
+                pH_min,
+                pH_max,
+                eh_min,
+                eh_max,
+            )
+        )
+    return _dedupe_frame_intersections(points)
+
+
+def _dedupe_frame_intersections(
+    points: Sequence[PourbaixFrameIntersection],
+    *,
+    pH_decimals: int = 3,
+    eh_decimals: int = 3,
+) -> list[PourbaixFrameIntersection]:
+    seen: set[tuple[float, float]] = set()
+    unique: list[PourbaixFrameIntersection] = []
+    for point in points:
+        key = (round(point.pH, pH_decimals), round(point.Eh, eh_decimals))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(point)
+    return sorted(unique, key=lambda item: (item.pH, item.Eh))
+
+
+def _plotted_boundary_polylines(
+    result: "PourbaixResult",
+    *,
+    boundary_mode: BoundaryMode,
+    show_equal_boundaries: bool,
+    show_analytic_boundaries: bool,
+    include_water_lines: bool,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    polylines: list[tuple[np.ndarray, np.ndarray]] = []
+    if show_equal_boundaries and result.equal_boundary_lines:
+        for _, _, pH_line, eh_line in result.equal_boundary_lines:
+            polylines.append((pH_line, eh_line))
+    if show_analytic_boundaries and result.analytic_boundaries:
+        for boundary in result.analytic_boundaries:
+            if boundary.kind == "water" and not include_water_lines:
+                continue
+            polylines.append((boundary.pH, boundary.Eh))
+    if include_water_lines and not (
+        show_analytic_boundaries and any(b.kind == "water" for b in result.analytic_boundaries)
+    ):
+        polylines.append((result.grid_pH, 1.229 - 2 * NERNST_K * result.grid_pH))
+        polylines.append((result.grid_pH, -2 * NERNST_K * result.grid_pH))
+    return polylines
 
 
 def _pH_grid(pH_min: float, pH_max: float, steps: int) -> np.ndarray:
@@ -801,6 +958,62 @@ class PourbaixResult:
             )
         return rows
 
+    def frame_intersections(
+        self,
+        *,
+        boundary_mode: BoundaryMode = "dominant",
+        show_equal_boundaries: Optional[bool] = None,
+        show_analytic_boundaries: Optional[bool] = None,
+        include_water_lines: bool = True,
+    ) -> list[PourbaixFrameIntersection]:
+        """Points where plotted boundaries meet the diagram frame (min/max pH and Eh)."""
+        if show_analytic_boundaries is None:
+            show_analytic_boundaries = boundary_mode == "all"
+        if show_equal_boundaries is None:
+            show_equal_boundaries = boundary_mode == "dominant"
+
+        pH_min = float(self.grid_pH[0])
+        pH_max = float(self.grid_pH[-1])
+        eh_min = float(self.grid_Eh[0])
+        eh_max = float(self.grid_Eh[-1])
+        points: list[PourbaixFrameIntersection] = []
+        for pH_line, eh_line in _plotted_boundary_polylines(
+            self,
+            boundary_mode=boundary_mode,
+            show_equal_boundaries=show_equal_boundaries,
+            show_analytic_boundaries=show_analytic_boundaries,
+            include_water_lines=include_water_lines,
+        ):
+            points.extend(
+                _polyline_frame_intersections(
+                    np.asarray(pH_line, dtype=float),
+                    np.asarray(eh_line, dtype=float),
+                    pH_min,
+                    pH_max,
+                    eh_min,
+                    eh_max,
+                )
+            )
+        return _dedupe_frame_intersections(points)
+
+    def frame_intersection_table(
+        self,
+        *,
+        boundary_mode: BoundaryMode = "dominant",
+        show_equal_boundaries: Optional[bool] = None,
+        show_analytic_boundaries: Optional[bool] = None,
+        include_water_lines: bool = True,
+    ) -> list[dict]:
+        return [
+            {"pH": point.pH, "Eh": point.Eh, "edge": point.edge}
+            for point in self.frame_intersections(
+                boundary_mode=boundary_mode,
+                show_equal_boundaries=show_equal_boundaries,
+                show_analytic_boundaries=show_analytic_boundaries,
+                include_water_lines=include_water_lines,
+            )
+        ]
+
     def _junction_annotation(
         self,
         junction: PourbaixJunction,
@@ -831,6 +1044,10 @@ class PourbaixResult:
         junction_label_style: JunctionLabelStyle = "numbered_coords",
         junction_pH_decimals: int = 2,
         junction_eh_decimals: int = 2,
+        show_frame_intersections: bool = False,
+        frame_intersection_labels: bool = True,
+        frame_intersection_pH_decimals: int = 2,
+        frame_intersection_eh_decimals: int = 2,
         labels: Optional[dict[int, str]] = None,
     ):
         import matplotlib.pyplot as plt
@@ -886,6 +1103,24 @@ class PourbaixResult:
                     xytext=(3, 3),
                     textcoords="offset points",
                 )
+
+        if show_frame_intersections:
+            for point in self.frame_intersections(
+                boundary_mode=boundary_mode,
+                show_equal_boundaries=show_equal_boundaries,
+                show_analytic_boundaries=show_analytic_boundaries,
+                include_water_lines=include_water_lines,
+            ):
+                ax.plot(point.pH, point.Eh, "ks", ms=5, mfc="none")
+                if frame_intersection_labels:
+                    ax.annotate(
+                        f"({point.pH:.{frame_intersection_pH_decimals}f}, "
+                        f"{point.Eh:.{frame_intersection_eh_decimals}f})",
+                        (point.pH, point.Eh),
+                        fontsize=5,
+                        xytext=(3, -8),
+                        textcoords="offset points",
+                    )
 
         if include_water_lines and not (
             show_analytic_boundaries and any(b.kind == "water" for b in self.analytic_boundaries)
@@ -943,11 +1178,17 @@ class PourbaixResult:
         junction_label_style: JunctionLabelStyle = "numbered_coords",
         junction_pH_decimals: int = 2,
         junction_eh_decimals: int = 2,
+        show_frame_intersections: bool = False,
+        frame_intersection_labels: bool = True,
+        frame_intersection_pH_decimals: int = 2,
+        frame_intersection_eh_decimals: int = 2,
     ):
         import matplotlib.pyplot as plt
 
         if ax is None:
             _, ax = plt.subplots(figsize=(8, 6))
+        show_equal = boundary_mode == "dominant"
+        show_analytic = boundary_mode == "all"
         if boundary_mode == "all":
             for boundary in self.analytic_boundaries:
                 if boundary.kind == "water" and not include_water_lines:
@@ -974,6 +1215,21 @@ class PourbaixResult:
                 (junction.pH, junction.Eh),
                 fontsize=7,
             )
+        if show_frame_intersections:
+            for point in self.frame_intersections(
+                boundary_mode=boundary_mode,
+                show_equal_boundaries=show_equal,
+                show_analytic_boundaries=show_analytic,
+                include_water_lines=include_water_lines,
+            ):
+                ax.plot(point.pH, point.Eh, "ks", ms=5, mfc="none")
+                if frame_intersection_labels:
+                    ax.annotate(
+                        f"({point.pH:.{frame_intersection_pH_decimals}f}, "
+                        f"{point.Eh:.{frame_intersection_eh_decimals}f})",
+                        (point.pH, point.Eh),
+                        fontsize=6,
+                    )
         if include_water_lines:
             ax.plot(self.grid_pH, -NERNST_K * self.grid_pH, "--", color="gray", label="H+/H2")
             ax.plot(self.grid_pH, 1.229 - NERNST_K * self.grid_pH, "--", color="black", label="O2/H2O")
@@ -1052,6 +1308,12 @@ class Pourbaix:
 
     ``plot(boundary_mode="all")`` draws every inferred analytic boundary and all line
     intersections (previous behaviour).
+
+    Frame intersections
+    -------------------
+    ``plot(show_frame_intersections=True)`` marks open squares where drawn boundaries
+    meet the diagram frame (minimum/maximum pH and Eh). Query coordinates with
+    ``frame_intersection_table()`` on the result object.
 
     Speciation methods
     ------------------

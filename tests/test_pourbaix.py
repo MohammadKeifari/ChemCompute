@@ -172,6 +172,23 @@ def test_write_selenium_pourbaix_outputs():
     assert filled_path.stat().st_size > 0
 
 
+def test_frame_intersections_on_selenium(se_diagram):
+    points = se_diagram.frame_intersections()
+    assert points
+    table = se_diagram.frame_intersection_table()
+    assert all("pH" in row and "Eh" in row and "edge" in row for row in table)
+    edges = {row["edge"] for row in table}
+    assert edges <= {"pH_min", "pH_max", "Eh_min", "Eh_max"}
+
+
+def test_frame_intersections_plot_option():
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use("Agg")
+    diagram = run_selenium_pourbaix(pH_steps=20, Eh_steps=20)
+    ax = diagram.plot(show=False, show_frame_intersections=True, frame_intersection_labels=False)
+    assert ax
+
+
 if __name__ == "__main__":
     test_write_selenium_pourbaix_outputs()
     print(f"Wrote Pourbaix plots to {POURBAIX_OUTPUT_DIR.resolve()}")
