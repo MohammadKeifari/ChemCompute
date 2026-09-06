@@ -72,10 +72,10 @@ def write_pourbaix():
         selenium_environment(),
         pH_min=0.0,
         pH_max=10.0,
-        pH_steps=80,
+        pH_steps=500,
         Eh_min=-1.0,
         Eh_max=1.4,
-        Eh_steps=80,
+        Eh_steps=500,
         speciation_method="model",
     ).run()
     diagram.plot(
@@ -84,22 +84,22 @@ def write_pourbaix():
         show=False,
     )
     diagram.plot(
-        plot_style="labeled",
-        save=str(IMAGES / "selenium_labeled.png"),
-        show=False,
-    )
-    diagram.plot_boundaries(
-        save=str(IMAGES / "selenium_boundaries.png"),
+        plot_style="filled",
+        show_frame_intersections=True,
+        save=str(IMAGES / "selenium_frame.png"),
         show=False,
     )
     diagram.plot_predominance(
         save=str(IMAGES / "selenium_predominance.png"),
         show=False,
     )
+    diagram.plot_boundaries(
+        save=str(IMAGES / "selenium_boundaries.png"),
+        show=False,
+    )
     diagram.plot(
-        plot_style="filled",
-        show_frame_intersections=True,
-        save=str(IMAGES / "selenium_frame.png"),
+        plot_style="labeled",
+        save=str(IMAGES / "selenium_labeled.png"),
         show=False,
     )
     diagram.plot(

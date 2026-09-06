@@ -46,20 +46,20 @@ diagram = Pourbaix(
     pH_max=10.0,
     Eh_min=-1.0,
     Eh_max=1.4,
-    pH_steps=80,
-    Eh_steps=80,
+    pH_steps=500,
+    Eh_steps=500,
 ).run()
 
 diagram.plot(plot_style="filled", save="selenium_filled.png", show=False)
-diagram.plot(plot_style="labeled", save="selenium_labeled.png", show=False)
-diagram.plot_boundaries(save="selenium_boundaries.png", show=False)
-diagram.plot_predominance(save="selenium_predominance.png", show=False)
 diagram.plot(
     plot_style="filled",
     show_frame_intersections=True,
     save="selenium_frame.png",
     show=False,
 )
+diagram.plot_predominance(save="selenium_predominance.png", show=False)
+diagram.plot_boundaries(save="selenium_boundaries.png", show=False)
+diagram.plot(plot_style="labeled", save="selenium_labeled.png", show=False)
 diagram.plot(
     plot_style="labeled",
     boundary_mode="all",
@@ -68,18 +68,18 @@ diagram.plot(
 )
 ```
 
-**Filled** (default) colors each predominance region. **Labeled** draws boundaries on white and writes the dominant species. **Boundaries** is the line-only view with a couple legend. **Predominance** is the fill without junction markers. **Frame intersections** marks where those lines meet the pH/Eh window. **All boundaries** (`boundary_mode="all"`) draws every analytic line, not only borders between neighboring regions.
+**Filled** (default) colors each predominance region. **Frame intersections** marks where dominant-region boundaries meet the pH/Eh window. **Predominance** is the fill without junction markers. **Boundaries** is the line-only view with a couple legend. **Labeled** draws boundaries on white and writes the dominant species. **All boundaries** (`boundary_mode="all"`) draws every analytic line, not only borders between neighboring regions.
 
 <p align="center">
   <img src="docs/images/selenium_filled.png" width="48%" alt="Selenium Pourbaix, filled" />
-  <img src="docs/images/selenium_labeled.png" width="48%" alt="Selenium Pourbaix, labeled" />
-</p>
-<p align="center">
-  <img src="docs/images/selenium_boundaries.png" width="48%" alt="Selenium Pourbaix, boundaries" />
-  <img src="docs/images/selenium_predominance.png" width="48%" alt="Selenium Pourbaix, predominance" />
-</p>
-<p align="center">
   <img src="docs/images/selenium_frame.png" width="48%" alt="Selenium Pourbaix with frame intersections" />
+</p>
+<p align="center">
+  <img src="docs/images/selenium_predominance.png" width="48%" alt="Selenium Pourbaix, predominance" />
+  <img src="docs/images/selenium_boundaries.png" width="48%" alt="Selenium Pourbaix, boundaries" />
+</p>
+<p align="center">
+  <img src="docs/images/selenium_labeled.png" width="48%" alt="Selenium Pourbaix, labeled" />
   <img src="docs/images/selenium_all_boundaries.png" width="48%" alt="Selenium Pourbaix, all analytic boundaries" />
 </p>
 
