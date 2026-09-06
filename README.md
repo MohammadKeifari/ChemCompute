@@ -9,7 +9,9 @@ ChemCompute models multi-reaction chemical systems in Python. You define compoun
 
 Both equilibrium and kinetics share the same reaction network, stoichiometry, and concentration state.
 
-The figures below were produced by ChemCompute’s own `plot` methods (and, for equilibrium, a bar chart of `result.concentrations_dict`). Regenerate them with `python docs/generate_readme_figures.py`.
+**Full documentation:** [docs/](docs/index.md) — install with `pip install -e ".[docs]"` and run `mkdocs serve` for a local preview.
+
+The figures below were produced by ChemCompute's own `plot` methods (and, for equilibrium, a bar chart of `result.concentrations_dict`). Regenerate them with `python docs/generate_readme_figures.py`.
 
 ## Examples
 

@@ -1,0 +1,82 @@
+site_name: ChemCompute
+site_description: Chemical reaction simulation — equilibrium, kinetics, titration, and Pourbaix diagrams
+site_url: https://mohammadkeifari.github.io/ChemCompute/
+repo_url: https://github.com/MohammadKeifari/ChemCompute
+repo_name: MohammadKeifari/ChemCompute
+
+docs_dir: docs
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - search.suggest
+    - content.code.copy
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Installation: getting-started/installation.md
+      - Quick start: getting-started/quickstart.md
+      - Concepts: concepts.md
+  - Core API:
+      - Compound: core/compound.md
+      - Reaction: core/reaction.md
+      - Environment: core/environment.md
+      - Equilibrium: core/equilibrium.md
+      - Kinetics: core/kinetics.md
+  - Guides:
+      - Reaction syntax: guide/syntax.md
+      - Mixing and titration: guide/mixing-and-titration.md
+      - Activity and buffering: guide/activity-and-buffering.md
+      - Half-reactions and Pourbaix: guide/pourbaix.md
+      - UV-Vis: guide/uvvis.md
+      - Bio kinetics: guide/bio-kinetics.md
+  - Libraries:
+      - Overview: libraries/overview.md
+      - Compounds: libraries/compounds.md
+      - Reactions: libraries/reactions.md
+      - Half-reactions: libraries/half-reactions.md
+      - Environments: libraries/environments.md
+  - Examples:
+      - Overview: examples/index.md
+      - Selenium Pourbaix: examples/selenium-pourbaix.md
+      - Ag2T titration: examples/ag2t-titration.md
+      - Env 16 equilibrium: examples/env16-equilibrium.md
+      - Jungle Model: examples/jungle-model.md
+  - Project:
+      - Layout: project/layout.md
+      - Testing: project/testing.md
+  - Troubleshooting: troubleshooting.md
+  - FAQ: faq.md
+  - Contributing: contributing.md

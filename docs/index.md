@@ -1,238 +1,56 @@
-# ChemCompute Documentation
+# ChemCompute documentation
 
-Welcome to the ChemCompute documentation! ChemCompute is a comprehensive Python library for chemical reaction simulation, including kinetic modeling and thermodynamic equilibrium calculations.
+ChemCompute models multi-reaction chemical systems in Python. You define compounds and reactions once, wrap them in an `Enviroment`, and then run:
 
-## Overview
+- **Equilibrium** — solve for concentrations where each reaction satisfies its mass-action expression (Q/K)
+- **Kinetics** — integrate concentrations forward in time from rate laws
+- **Titration** — mix a sample with a titrant over a volume grid and equilibrate at each step
+- **Pourbaix** — map predominance vs pH and electrode potential
 
-ChemCompute provides a powerful and flexible framework for:
+Both equilibrium and kinetics share the same reaction network, stoichiometry, and concentration state.
 
-- **Chemical Compound Management**: Create and manage chemical compounds with formulas, phases, and physical properties
-- **Reaction Definition**: Define complex chemical reactions with multiple reactants and products
-- **Temperature-Dependent Calculations**: Automatic updates of rate constants and equilibrium constants using Arrhenius and van't Hoff equations
-- **Thermodynamic Properties**: Support for enthalpy, entropy, and activation energies for realistic temperature-dependent simulations
-- **Kinetic Simulation**: Simulate time-dependent concentration changes using numerical integration
-- **Equilibrium Calculations**: Calculate equilibrium concentrations using advanced optimization algorithms
-- **Phase Handling**: Support for solid, liquid, gas, and aqueous phases with temperature-dependent transitions
-- **Visualization**: Interactive and static plotting capabilities for analyzing reaction kinetics
+## Where to start
 
-## Quick Navigation
+| If you want to… | Start here |
+|-----------------|------------|
+| Install the package | [Installation](getting-started/installation.md) |
+| Run your first calculation | [Quick start](getting-started/quickstart.md) |
+| Understand the object model | [Concepts](concepts.md) |
+| See full worked examples with figures | [Examples](examples/index.md) or the [README gallery](https://github.com/MohammadKeifari/ChemCompute#examples) |
 
-### Getting Started
+## Core components
 
-- [Installation Guide](installation.md) - How to install and set up ChemCompute
-- [Quick Start Tutorial](quickstart.md) - Get up and running in minutes
-- [Basic Concepts](concepts.md) - Understanding the core concepts
+- [Compound](core/compound.md) — formulas, phases, melting/boiling points, UV-Vis spectra
+- [Reaction](core/reaction.md) — stoichiometry, K, rate constants, string notation
+- [Environment](core/environment.md) — multi-reaction systems, mixing, buffering
+- [Equilibrium](core/equilibrium.md) — Newton / BGD / SGD solvers, phases, excess
+- [Kinetics](core/kinetics.md) — time integration and plotting
 
-### Core Components
+## Guides
 
-- [Compound Class](compound.md) - Working with chemical compounds
-- [Reaction Class](reaction.md) - Defining and managing chemical reactions
-- [Enviroment Class](environment.md) - Managing reaction systems (`equilibrium()`, `kinetics()`)
+- [Reaction syntax](guide/syntax.md) — `&`, `@e`, phase suffixes, live compound tokens
+- [Mixing and titration](guide/mixing-and-titration.md)
+- [Activity and buffering](guide/activity-and-buffering.md)
+- [Half-reactions and Pourbaix](guide/pourbaix.md)
+- [UV-Vis](guide/uvvis.md)
+- [Bio kinetics](guide/bio-kinetics.md)
 
-### Advanced Topics
+## Libraries
 
-- [Reaction Syntax Guide](syntax.md) - Understanding reaction string formats
-- [Phase Handling](phases.md) - Working with different phases
-- [Optimization Methods](optimization.md) - Understanding equilibrium calculation algorithms
-- [Visualization](visualization.md) - Creating plots and visualizations
-- [Performance Tips](performance.md) - Optimizing your simulations
+Pre-built compounds, reactions, half-reactions, and coupled environments with tabulated K or E° and zero concentrations:
 
-### Examples
-
-- [Basic Examples](examples/basic.md) - Simple reaction examples
-- [Advanced Examples](examples/advanced.md) - Complex multi-reaction systems
-- [Real-World Applications](examples/applications.md) - Practical use cases
-
-### API Reference
-
-- [Full API Documentation](api/index.md) - Complete API reference
-- [Compound API](api/compound.md) - Compound class methods and properties
-- [Reaction API](api/reaction.md) - Reaction class methods and properties
-- [Enviroment API](api/environment.md) - Enviroment class methods and properties
-
-### Additional Resources
-
-- [Troubleshooting](troubleshooting.md) - Common issues and solutions
-- [FAQ](faq.md) - Frequently asked questions
-- [Contributing](contributing.md) - How to contribute to ChemCompute
-- [Changelog](changelog.md) - Version history and changes
-
-## Key Features
-
-### 🧪 Chemical Compound Representation
-
-Create compounds with formulas, phases, and physical properties:
-
-```python
-from ChemCompute import Compound
-
-# Simple compound
-water = Compound("H2O")
-
-# With phase information
-co2 = Compound("CO2", phase_point_list=[{"phase": "g", "temperature": 298}])
-
-# With melting/boiling points
-ethanol = Compound("C2H5OH", mp=-114, bp=78)
-```
-
-### ⚗️ Reaction Definition
-
-Define reactions using string notation with thermodynamic parameters:
-
-```python
-from ChemCompute import Reaction
-
-# String notation with thermodynamic parameters
-rxn = Reaction.from_string(
-    "2_A & B > 3_C",
-    concentrations=[1.0, 1.0, 0.0],
-    K=10.0,
-    kf=0.5,
-    kb=0.05,
-    enthalpy=-50000,  # J/mol
-    entropy=-100,     # J/(mol·K)
-    activation_energy_forward=50000,   # J/mol
-    activation_energy_backward=100000  # J/mol
-)
-```
-
-### 🌡️ Temperature-Dependent Calculations
-
-Automatically update rate constants and equilibrium constants with temperature:
-
-```python
-# Create reaction with thermodynamic parameters
-rxn = Reaction.from_string(
-    "A > B",
-    K=2.0,
-    kf=0.5,
-    kb=0.25,
-    enthalpy=-50000,
-    activation_energy_forward=50000,
-    activation_energy_backward=100000,
-    T=298
-)
-
-# Change temperature - K, kf, kb automatically update
-rxn.T = 350  # Uses Arrhenius and van't Hoff equations
-```
-
-### ⏱️ Kinetic Simulation
-
-Simulate reaction kinetics over time:
-
-```python
-results = env.kinetics(time=10.0, accuracy=1e-3, plot="interactive")
-```
-
-### ⚖️ Equilibrium Calculations
-
-Calculate equilibrium concentrations using multiple algorithms and loss functions:
-
-```python
-result = env.equilibrium(
-    method="newton",
-    loss="log_quotient",
-    max_iter=1000,
-    tol=1e-8,
-    quotient_error_limit=0.01,
-    return_details=True,
-)
-
-print(result.q_over_k)        # per-reaction Q/K at solution
-print(result.stop_reason)     # why the solver stopped
-print(result.iterations)
-
-# Or apply concentrations back to the environment
-result = env.apply_equilibrium(method="newton")
-```
-
-## Installation
-
-### From PyPI (Recommended)
-
-Install ChemCompute directly from PyPI:
-
-```bash
-pip install chemcompute==0.1.0
-```
-
-This will automatically install all required dependencies (numpy and matplotlib).
-
-### From Source
-
-For development or to install from source:
-
-```bash
-git clone <repository-url>
-cd ChemCompute
-pip install -e .
-```
-
-For detailed installation instructions, see the [Installation Guide](installation.md).
-
-## Quick Example
-
-Here's a complete example to get you started:
-
-```python
-from ChemCompute import Compound, Reaction, Enviroment
-
-# Create a simple reversible reaction: A ⇌ B
-rxn = Reaction.from_string(
-    "A > B",
-    concentrations=[1.0, 0.0],
-    K=2.0,
-    kf=0.5,
-    kb=0.25
-)
-
-# Create environment
-env = Enviroment(rxn, T=298)
-
-# Kinetic simulation
-kinetic_results = env.kinetics(time=10.0, accuracy=0.01, plot=False)
-
-# Equilibrium calculation
-equilibrium = env.equilibrium(method="bgd", max_iter=1000, tol=1e-8)
-
-print(f"Equilibrium concentrations: {equilibrium}")
-```
-
-## Documentation Structure
-
-This documentation is organized into several sections:
-
-1. **Getting Started** - Installation and basic usage
-2. **Core Components** - Detailed documentation of each class
-3. **Advanced Topics** - Advanced features and techniques
-4. **Examples** - Practical examples and use cases
-5. **API Reference** - Complete API documentation
-6. **Additional Resources** - Troubleshooting, FAQ, and more
+- [Libraries overview](libraries/overview.md)
+- [Compounds](libraries/compounds.md)
+- [Reactions](libraries/reactions.md)
+- [Half-reactions](libraries/half-reactions.md)
+- [Environments](libraries/environments.md)
 
 ## Requirements
 
-- Python 3.7 or higher
+- Python 3.9 or higher
 - NumPy
-- Matplotlib (for plotting features)
-
-## Support
-
-For questions, issues, or contributions:
-
-- Check the [FAQ](faq.md) for common questions
-- Review [Troubleshooting](troubleshooting.md) for solutions to common issues
-- See [Contributing](contributing.md) for how to contribute
+- Matplotlib (for plotting)
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](../LICENSE) file for details.
-
-## Version
-
-Current version: 0.1.0
-
----
-
-**Next Steps**: Start with the [Installation Guide](installation.md) or jump to the [Quick Start Tutorial](quickstart.md) to begin using ChemCompute.
+MIT — see [LICENSE](https://github.com/MohammadKeifari/ChemCompute/blob/main/LICENSE).

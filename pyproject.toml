@@ -37,10 +37,14 @@ dev = [
     "pytest>=6.0.0",
     "pytest-cov>=2.0.0",
 ]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+]
 
 [project.urls]
 Homepage = "https://github.com/MohammadKeifari/ChemCompute"
-Documentation = "https://github.com/MohammadKeifari/ChemCompute#readme"
+Documentation = "https://mohammadkeifari.github.io/ChemCompute/"
 Repository = "https://github.com/MohammadKeifari/ChemCompute"
 Issues = "https://github.com/MohammadKeifari/ChemCompute/issues"
 
