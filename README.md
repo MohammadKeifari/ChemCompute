@@ -1,11 +1,189 @@
 # ChemCompute
 
-ChemCompute models multi-reaction chemical systems in Python. You define compounds and reactions once, wrap them in an `Enviroment`, and then run either:
+ChemCompute models multi-reaction chemical systems in Python. You define compounds and reactions once, wrap them in an `Enviroment`, and then run:
 
 - **Equilibrium** — solve for concentrations where each reaction satisfies its mass-action expression (Q/K)
 - **Kinetics** — integrate concentrations forward in time from rate laws
+- **Titration** — mix a sample with a titrant over a volume grid and equilibrate at each step
+- **Pourbaix** — map predominance vs pH and electrode potential
 
-Both paths share the same reaction network, stoichiometry, and concentration state.
+Both equilibrium and kinetics share the same reaction network, stoichiometry, and concentration state.
+
+The figures below were produced by ChemCompute’s own `plot` methods (and, for equilibrium, a bar chart of `result.concentrations_dict`). Regenerate them with `python docs/generate_readme_figures.py`.
+
+## Examples
+
+### Selenium Pourbaix diagram
+
+Selenium at 1 M total Se, pH 0–10, with the aqueous acid–base ladder and the HSeO4− / H2SeO3 / Se / H2Se redox chain.
+
+```python
+from ChemCompute import Enviroment, HalfReaction, Pourbaix, Reaction, XS
+
+def ka(acid, base, pka):
+    return Reaction.from_string(f"{acid} > H+ & {base}", K=10 ** (-pka))
+
+env = Enviroment(
+    Reaction.from_string("H2O.l > H+ & OH-", concentrations={"H2O": XS(0.0)}, K=1e-14),
+    ka("HSeO4-", "SeO4-2", 1.92),
+    ka("H2SeO3", "HSeO3-", 2.62),
+    ka("HSeO3-", "SeO3-2", 7.19),
+    ka("H2Se", "HSe-", 3.89),
+    HalfReaction.from_string(
+        "HSeO4- & 3_H+ & 2_@e = H2SeO3 & H2O.l", E0=1.15, name="HSeO4-/H2SeO3"
+    ),
+    HalfReaction.from_string(
+        "H2SeO3 & 4_H+ & 4_@e = Se.s & 3_H2O.l", E0=0.74, name="H2SeO3/Se"
+    ),
+    HalfReaction.from_string("Se.s & 2_H+ & 2_@e = H2Se", E0=-0.11, name="Se/H2Se"),
+    concentrations={"HSeO4-": 1.0},
+    buffer=["H+"],
+)
+
+diagram = Pourbaix(
+    env,
+    pH_min=0.0,
+    pH_max=10.0,
+    Eh_min=-1.0,
+    Eh_max=1.4,
+    pH_steps=80,
+    Eh_steps=80,
+).run()
+
+diagram.plot(plot_style="filled", save="selenium_filled.png", show=False)
+diagram.plot(plot_style="labeled", save="selenium_labeled.png", show=False)
+diagram.plot_boundaries(save="selenium_boundaries.png", show=False)
+diagram.plot_predominance(save="selenium_predominance.png", show=False)
+diagram.plot(
+    plot_style="filled",
+    show_frame_intersections=True,
+    save="selenium_frame.png",
+    show=False,
+)
+diagram.plot(
+    plot_style="labeled",
+    boundary_mode="all",
+    save="selenium_all_boundaries.png",
+    show=False,
+)
+```
+
+**Filled** (default) colors each predominance region. **Labeled** draws boundaries on white and writes the dominant species. **Boundaries** is the line-only view with a couple legend. **Predominance** is the fill without junction markers. **Frame intersections** marks where those lines meet the pH/Eh window. **All boundaries** (`boundary_mode="all"`) draws every analytic line, not only borders between neighboring regions.
+
+<p align="center">
+  <img src="docs/images/selenium_filled.png" width="48%" alt="Selenium Pourbaix, filled" />
+  <img src="docs/images/selenium_labeled.png" width="48%" alt="Selenium Pourbaix, labeled" />
+</p>
+<p align="center">
+  <img src="docs/images/selenium_boundaries.png" width="48%" alt="Selenium Pourbaix, boundaries" />
+  <img src="docs/images/selenium_predominance.png" width="48%" alt="Selenium Pourbaix, predominance" />
+</p>
+<p align="center">
+  <img src="docs/images/selenium_frame.png" width="48%" alt="Selenium Pourbaix with frame intersections" />
+  <img src="docs/images/selenium_all_boundaries.png" width="48%" alt="Selenium Pourbaix, all analytic boundaries" />
+</p>
+
+### Precipitation titration (AgF / ammonium tartrate)
+
+50 mL of 0.07 M AgF titrated with 0.01 M (NH4)2T. Precipitation of Ag2T (Ksp = 4e-12) is predicted when Qsp = [Ag+]^2 [T-2] crosses Ksp, near **0.0042 µL**.
+
+```python
+from ChemCompute import Enviroment, Reaction, Titration, XS
+import numpy as np
+
+agf = Enviroment(
+    Reaction.from_string(
+        "H2O.l > H+ & OH-",
+        concentrations={"H2O": XS(55.5), "H+": 1e-7, "OH-": 1e-7},
+        K=1e-14,
+    ),
+    Reaction.from_string("HF.aq > H+ & F-", K=10 ** (-3.1)),
+    concentrations={"Ag+": 0.07, "F-": 0.07},
+    volume=0.050,
+)
+titrant = Enviroment(
+    Reaction.from_string("H2T > H+ & HT-", K=10 ** (-4.2)),
+    Reaction.from_string("HT- > H+ & T-2", K=10 ** (-6.5)),
+    Reaction.from_string("NH4+ > H+ & NH3", K=10 ** (-9.2)),
+    Reaction.from_string("Ag+ & 2_NH3 > Ag(NH3)2+", K=2e7),
+    concentrations={"NH4+": 0.02, "T-2": 0.01},
+    volume=1.0,
+)
+
+volumes_ul = np.linspace(0.0, 0.012, 61)
+curve = Titration(agf, titrant, volumes=volumes_ul * 1e-6).run(
+    method="newton", tol=1e-10
+)
+qsp = curve.species("Ag+") ** 2 * curve.species("T-2")
+```
+
+<p align="center">
+  <img src="docs/images/ag2t_titration_qsp.png" width="72%" alt="Ag2T precipitation onset from Qsp vs Ksp" />
+</p>
+
+### Equilibrium (env 16)
+
+HF / fluoride speciation in 0.06 M HCl with excess CaF2(s) and H2O(l). Excess solids and liquid water stay at activity 1; HCl is fully dissociated (`infinite_K`).
+
+```python
+from ChemCompute import Enviroment, Reaction, XS
+
+env = Enviroment(
+    Reaction.from_string("HF.aq & F-.aq > HF2-.aq", {}, K=0.1),
+    Reaction.from_string("2_HF.aq > H2F2.aq", {}, K=0.5),
+    Reaction.from_string("HF.aq > H+ & F-", {}, K=10 ** (-2.93)),
+    Reaction.from_string(
+        "H2O.l > H+ & OH-",
+        {"H2O": XS(55.5), "H+": 1e-14 / 0.06},
+        K=1e-14,
+    ),
+    Reaction.from_string("CaF2.s > Ca+2 & 2_F-", {"CaF2": XS(10.0)}, K=5e-9),
+    Reaction.from_string("HCl.aq > H+ & Cl-", {"HCl": 0.06}, K=1.0, infinite_K=True),
+)
+
+result = env.equilibrium(method="newton", tol=1e-10, return_details=True)
+print(result.concentrations_dict)
+```
+
+<p align="center">
+  <img src="docs/images/env16_speciation.png" width="72%" alt="Env 16 aqueous equilibrium speciation" />
+</p>
+
+### Kinetics (Jungle Model)
+
+Autocatalytic growth of R on resource T, death of R to D, conversion of R into W, and death of W to inert:
+
+```
+R + T  ->  2R       k = 0.01
+R      ->  D        k = 0.5
+R + W  ->  2W       k = 0.01
+W      ->  inert    k = 0.5
+```
+
+```python
+from ChemCompute import Enviroment, Reaction
+
+env = Enviroment(
+    Reaction.from_string("R & T > 2_R", kf=0.01, kb=0.0, K=1e12),
+    Reaction.from_string("R > D", kf=0.5, kb=0.0, K=1e12),
+    Reaction.from_string("R & W > 2_W", kf=0.01, kb=0.0, K=1e12),
+    Reaction.from_string("W > inert", kf=0.5, kb=0.0, K=1e12),
+    concentrations={"R": 70.0, "T": 100.0, "W": 20.0},
+)
+env.kinetics(
+    time=40.0,
+    accuracy=0.05,
+    plot="save",
+    directory="jungle_model.png",
+    colors=["#2a9d8f", "#e9c46a", "#6d6875", "#e76f51", "#264653"],
+)
+```
+
+<p align="center">
+  <img src="docs/images/jungle_model.png" width="72%" alt="Jungle Model kinetic trajectories" />
+</p>
+
+---
 
 ## Installation
 
