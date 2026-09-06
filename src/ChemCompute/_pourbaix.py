@@ -26,6 +26,7 @@ from ._pourbaix_graph import (
 from ._titration import _find_h_plus_index
 
 BoundaryMode = Literal["dominant", "all"]
+PlotStyle = Literal["filled", "labeled"]
 
 
 def _pH_grid(pH_min: float, pH_max: float, steps: int) -> np.ndarray:
@@ -147,9 +148,16 @@ def _on_dominant_interface(
     track_species: Sequence[str],
     *,
     background_ions: Optional[dict[str, float]] = None,
+    grid_pH: Optional[np.ndarray] = None,
 ) -> bool:
     """True when (pH, Eh) lies on the border between two dominant region species."""
     label_to_index = {name: index for index, name in enumerate(track_species)}
+
+    if grid_pH is not None and len(grid_pH) > 1:
+        pH_delta = max(0.05, 0.45 * (float(grid_pH[-1]) - float(grid_pH[0])) / (len(grid_pH) - 1))
+    else:
+        pH_delta = 0.05
+    eh_delta = 1e-3
 
     def dominant_index(ph: float, eh: float) -> int:
         _, index = graph_speciation(
@@ -164,13 +172,128 @@ def _on_dominant_interface(
 
     seen = {
         dominant_index(pH, Eh),
-        dominant_index(pH, Eh + 1e-3),
-        dominant_index(pH, Eh - 1e-3),
-        dominant_index(pH + 1e-3, Eh),
-        dominant_index(pH - 1e-3, Eh),
+        dominant_index(pH, Eh + eh_delta),
+        dominant_index(pH, Eh - eh_delta),
+        dominant_index(pH + pH_delta, Eh),
+        dominant_index(pH - pH_delta, Eh),
     }
     seen.discard(-1)
     return idx_a in seen and idx_b in seen
+
+
+def _merge_eh_intervals(ehs: Sequence[float], eh_gap: float) -> list[tuple[float, float]]:
+    if not ehs:
+        return []
+    ordered = sorted(set(float(eh) for eh in ehs))
+    intervals: list[tuple[float, float]] = []
+    start = ordered[0]
+    previous = ordered[0]
+    for eh in ordered[1:]:
+        if eh - previous > eh_gap:
+            intervals.append((start, previous))
+            start = eh
+        previous = eh
+    intervals.append((start, previous))
+    return intervals
+
+
+def _vertical_eh_spans_for_pair(
+    grid_pH: np.ndarray,
+    grid_Eh: np.ndarray,
+    grid_dominant: np.ndarray,
+    idx_a: int,
+    idx_b: int,
+    *,
+    pH_target: Optional[float] = None,
+    pH_tol: Optional[float] = None,
+) -> list[tuple[float, float, float]]:
+    """Return ``(pH_line, eh_lo, eh_hi)`` segments for a vertical predominance border."""
+    if pH_tol is None:
+        pH_tol = (float(grid_pH[-1]) - float(grid_pH[0])) / max(len(grid_pH) - 1, 1) * 0.75
+    eh_gap = (float(grid_Eh[-1]) - float(grid_Eh[0])) / max(len(grid_Eh) - 1, 1) * 1.5
+
+    edges: dict[float, list[float]] = {}
+    for i in range(len(grid_pH) - 1):
+        pH_edge = 0.5 * (float(grid_pH[i]) + float(grid_pH[i + 1]))
+        if pH_target is not None and abs(pH_edge - pH_target) > pH_tol:
+            continue
+        for j in range(len(grid_Eh)):
+            left = int(grid_dominant[i, j])
+            right = int(grid_dominant[i + 1, j])
+            if {left, right} != {idx_a, idx_b}:
+                continue
+            key = round(pH_edge, 4)
+            edges.setdefault(key, []).append(float(grid_Eh[j]))
+
+    segments: list[tuple[float, float, float]] = []
+    for pH_edge, ehs in edges.items():
+        pH_line = float(pH_target) if pH_target is not None else pH_edge
+        for eh_lo, eh_hi in _merge_eh_intervals(ehs, eh_gap):
+            if eh_hi >= eh_lo:
+                segments.append((pH_line, eh_lo, eh_hi))
+    return segments
+
+
+def _dominant_acid_base_lines(
+    grid_pH: np.ndarray,
+    grid_Eh: np.ndarray,
+    grid_dominant: np.ndarray,
+    track_species: Sequence[str],
+    analytic_boundaries: Sequence[PourbaixBoundary],
+    *,
+    pH_min: float,
+    pH_max: float,
+    eh_min: float,
+    eh_max: float,
+) -> list[tuple[int, int, np.ndarray, np.ndarray]]:
+    """Vertical pH boundaries between dominant acid/base neighbors."""
+    lines: list[tuple[int, int, np.ndarray, np.ndarray]] = []
+    acid_base_targets = {
+        frozenset({boundary.left, boundary.right})
+        for boundary in analytic_boundaries
+        if boundary.kind == "acid_base"
+    }
+    use_grid_only = not acid_base_targets
+
+    for idx_a, idx_b in sorted(_adjacent_species_pairs(grid_dominant)):
+        name_a = track_species[idx_a]
+        name_b = track_species[idx_b]
+        target = frozenset({name_a, name_b})
+        if not use_grid_only and target not in acid_base_targets:
+            continue
+
+        pH_target: Optional[float] = None
+        if not use_grid_only:
+            for boundary in analytic_boundaries:
+                if boundary.kind == "acid_base" and {boundary.left, boundary.right} == {name_a, name_b}:
+                    pH_target = float(boundary.pH[0])
+                    break
+
+        spans = _vertical_eh_spans_for_pair(
+            grid_pH,
+            grid_Eh,
+            grid_dominant,
+            idx_a,
+            idx_b,
+            pH_target=pH_target,
+        )
+        if use_grid_only and not spans:
+            continue
+
+        for pH_line, eh_lo, eh_hi in spans:
+            eh_lo = max(eh_lo, eh_min)
+            eh_hi = min(eh_hi, eh_max)
+            if eh_hi <= eh_lo:
+                continue
+            lines.append(
+                (
+                    idx_a,
+                    idx_b,
+                    np.asarray([pH_line, pH_line], dtype=float),
+                    np.asarray([eh_lo, eh_hi], dtype=float),
+                )
+            )
+    return lines
 
 
 def _clip_curve_to_dominant_pair(
@@ -190,7 +313,10 @@ def _clip_curve_to_dominant_pair(
     eh_min: float,
     eh_max: float,
     background_ions: Optional[dict[str, float]] = None,
+    grid_pH: Optional[np.ndarray] = None,
 ) -> list[tuple[np.ndarray, np.ndarray]]:
+    if boundary.kind == "acid_base":
+        return []
     active = np.zeros(len(pH_curve), dtype=bool)
     target = {name_a, name_b}
     for index in range(len(pH_curve)):
@@ -210,6 +336,7 @@ def _clip_curve_to_dominant_pair(
             totals,
             track_species,
             background_ions=background_ions,
+            grid_pH=grid_pH,
         ):
             continue
         active[index] = True
@@ -217,6 +344,8 @@ def _clip_curve_to_dominant_pair(
 
 
 def _dominant_analytic_boundary_lines(
+    grid_pH: np.ndarray,
+    grid_Eh: np.ndarray,
     grid_dominant: np.ndarray,
     track_species: Sequence[str],
     analytic_boundaries: Sequence[PourbaixBoundary],
@@ -238,7 +367,7 @@ def _dominant_analytic_boundary_lines(
         name_a = track_species[idx_a]
         name_b = track_species[idx_b]
         for boundary in analytic_boundaries:
-            if boundary.kind == "water":
+            if boundary.kind in {"water", "acid_base"}:
                 continue
             for pH_seg, eh_seg in _clip_curve_to_dominant_pair(
                 boundary.pH,
@@ -256,9 +385,23 @@ def _dominant_analytic_boundary_lines(
                 eh_min=eh_min,
                 eh_max=eh_max,
                 background_ions=background_ions,
+                grid_pH=grid_pH,
             ):
                 if len(pH_seg) >= 2:
                     lines.append((idx_a, idx_b, pH_seg, eh_seg))
+    lines.extend(
+        _dominant_acid_base_lines(
+            grid_pH,
+            grid_Eh,
+            grid_dominant,
+            track_species,
+            analytic_boundaries,
+            pH_min=pH_min,
+            pH_max=pH_max,
+            eh_min=eh_min,
+            eh_max=eh_max,
+        )
+    )
     return lines
 
 
@@ -304,6 +447,7 @@ def _contour_boundary_lines_for_pair(
                                 totals,
                                 track_species,
                                 background_ions=background_ions,
+                                grid_pH=grid_pH,
                             )
                             for k in range(len(vertices))
                         ],
@@ -338,6 +482,8 @@ def _equal_concentration_boundaries(
     """Analytic point-to-point lines between dominant neighbors only."""
     if analytic_boundaries and graph is not None and totals is not None:
         lines = _dominant_analytic_boundary_lines(
+            grid_pH,
+            grid_Eh,
             grid_dominant,
             track_species,
             analytic_boundaries,
@@ -376,6 +522,104 @@ def _equal_concentration_boundaries(
             )
         )
     return lines
+
+
+def _connected_dominant_regions(
+    grid_pH: np.ndarray,
+    grid_Eh: np.ndarray,
+    grid_dominant: np.ndarray,
+) -> list[tuple[int, list[tuple[int, int]]]]:
+    """Four-connected components of equal ``grid_dominant`` index."""
+    n_pH, n_eh = grid_dominant.shape
+    visited = np.zeros((n_pH, n_eh), dtype=bool)
+    components: list[tuple[int, list[tuple[int, int]]]] = []
+    for i in range(n_pH):
+        for j in range(n_eh):
+            if visited[i, j]:
+                continue
+            species = int(grid_dominant[i, j])
+            cells: list[tuple[int, int]] = []
+            stack = [(i, j)]
+            visited[i, j] = True
+            while stack:
+                ci, cj = stack.pop()
+                cells.append((ci, cj))
+                for ni, nj in ((ci - 1, cj), (ci + 1, cj), (ci, cj - 1), (ci, cj + 1)):
+                    if 0 <= ni < n_pH and 0 <= nj < n_eh and not visited[ni, nj]:
+                        if int(grid_dominant[ni, nj]) != species:
+                            continue
+                        visited[ni, nj] = True
+                        stack.append((ni, nj))
+            components.append((species, cells))
+    return components
+
+
+def _region_label_fontsize(
+    ax,
+    text: str,
+    pH_lo: float,
+    pH_hi: float,
+    eh_lo: float,
+    eh_hi: float,
+    *,
+    min_font: float = 6.0,
+    max_font: float = 14.0,
+) -> float:
+    """Pick a font size that fits inside a predominance region bbox."""
+    fig = ax.figure
+    dpi = fig.dpi
+    transform = ax.transData.transform
+    (x0, y0) = transform((pH_lo, eh_lo))
+    (x1, y1) = transform((pH_hi, eh_hi))
+    width_pt = abs(x1 - x0) * 72.0 / dpi
+    height_pt = abs(y1 - y0) * 72.0 / dpi
+    if width_pt <= 0 or height_pt <= 0:
+        return min_font
+    char_count = max(len(text), 1)
+    by_width = width_pt / (0.55 * char_count)
+    by_height = height_pt * 0.45
+    return float(np.clip(min(by_width, by_height), min_font, max_font))
+
+
+def _dominant_region_annotations(
+    grid_pH: np.ndarray,
+    grid_Eh: np.ndarray,
+    grid_dominant: np.ndarray,
+    label_map: dict[int, str],
+    *,
+    ax,
+    min_cells: int = 2,
+) -> None:
+    """Place species labels at connected-region centroids with size-aware font."""
+    if len(grid_pH) < 2 or len(grid_Eh) < 2:
+        return
+    dpH = float(grid_pH[1] - grid_pH[0])
+    dEh = float(grid_Eh[1] - grid_Eh[0])
+    for species_index, cells in _connected_dominant_regions(grid_pH, grid_Eh, grid_dominant):
+        if len(cells) < min_cells:
+            continue
+        text = label_map.get(species_index)
+        if not text:
+            continue
+        pH_values = [float(grid_pH[i]) for i, _ in cells]
+        eh_values = [float(grid_Eh[j]) for _, j in cells]
+        pH_center = float(np.mean(pH_values))
+        eh_center = float(np.mean(eh_values))
+        pH_lo = min(pH_values) - 0.5 * dpH
+        pH_hi = max(pH_values) + 0.5 * dpH
+        eh_lo = min(eh_values) - 0.5 * dEh
+        eh_hi = max(eh_values) + 0.5 * dEh
+        fontsize = _region_label_fontsize(ax, text, pH_lo, pH_hi, eh_lo, eh_hi)
+        ax.text(
+            pH_center,
+            eh_center,
+            text,
+            ha="center",
+            va="center",
+            fontsize=fontsize,
+            clip_on=True,
+            wrap=True,
+        )
 
 
 def _dominant_junction_points(
@@ -579,6 +823,7 @@ class PourbaixResult:
         show: bool = True,
         save: Optional[str] = None,
         include_water_lines: bool = True,
+        plot_style: PlotStyle = "filled",
         boundary_mode: BoundaryMode = "dominant",
         show_analytic_boundaries: Optional[bool] = None,
         show_equal_boundaries: Optional[bool] = None,
@@ -605,13 +850,16 @@ class PourbaixResult:
         if ax is None:
             _, ax = plt.subplots(figsize=(8, 7))
 
-        pH_mesh, eh_mesh = np.meshgrid(self.grid_pH, self.grid_Eh, indexing="ij")
         label_map = labels or {i: name for i, name in enumerate(self.track_species)}
-        n_species = max(len(self.track_species), int(self.grid_dominant.max()) + 1)
-        cmap = ListedColormap(plt.cm.tab10.colors[: max(n_species, 1)])
-        norm = BoundaryNorm(np.arange(-0.5, n_species + 0.5, 1), n_species)
 
-        ax.pcolormesh(pH_mesh, eh_mesh, self.grid_dominant, cmap=cmap, norm=norm, shading="auto")
+        if plot_style == "filled":
+            pH_mesh, eh_mesh = np.meshgrid(self.grid_pH, self.grid_Eh, indexing="ij")
+            n_species = max(len(self.track_species), int(self.grid_dominant.max()) + 1)
+            cmap = ListedColormap(plt.cm.tab10.colors[: max(n_species, 1)])
+            norm = BoundaryNorm(np.arange(-0.5, n_species + 0.5, 1), n_species)
+            ax.pcolormesh(pH_mesh, eh_mesh, self.grid_dominant, cmap=cmap, norm=norm, shading="auto")
+        else:
+            ax.set_facecolor("white")
 
         if show_analytic_boundaries and self.analytic_boundaries:
             for boundary in self.analytic_boundaries:
@@ -650,11 +898,23 @@ class PourbaixResult:
         ax.set_xlabel("pH")
         ax.set_ylabel("Eh (V vs SHE)")
         ax.set_title("Pourbaix diagram")
-        handles = [
-            plt.Line2D([0], [0], marker="s", ls="", color=cmap(i))
-            for i in range(len(self.track_species))
-        ]
-        ax.legend(handles, [label_map[i] for i in range(len(self.track_species))], loc="upper right", fontsize=7, ncol=2)
+
+        if plot_style == "labeled":
+            _dominant_region_annotations(
+                self.grid_pH,
+                self.grid_Eh,
+                self.grid_dominant,
+                label_map,
+                ax=ax,
+            )
+        else:
+            n_species = max(len(self.track_species), int(self.grid_dominant.max()) + 1)
+            cmap = ListedColormap(plt.cm.tab10.colors[: max(n_species, 1)])
+            handles = [
+                plt.Line2D([0], [0], marker="s", ls="", color=cmap(i))
+                for i in range(len(self.track_species))
+            ]
+            ax.legend(handles, [label_map[i] for i in range(len(self.track_species))], loc="upper right", fontsize=7, ncol=2)
         if save:
             plt.savefig(save, bbox_inches="tight", dpi=150)
         if show and not save:
@@ -740,12 +1000,33 @@ class Pourbaix:
 
     Grid resolution
     ---------------
-    ``pH_steps`` and ``Eh_steps`` set the **predominance-region grid** used for the
-    colored background in **both** ``model`` and ``equilibrium`` modes. Each cell
-    stores one dominant species index. Boundaries in ``model`` mode are computed
-    analytically (``geometry_pH_steps`` controls boundary sampling only). If the
-    fill looks blocky, increase ``pH_steps`` / ``Eh_steps``; the lines stay smooth
-    but the colored regions resolve better.
+    ``pH_steps`` and ``Eh_steps`` set the **predominance-region grid** used to decide
+    which species border each other and (for ``plot_style="filled"``) the colored
+    background. Each cell stores one dominant species index.
+
+    +------------------+---------------------------+---------------------------+
+    | Parameter        | ``speciation_method``     | Primary effect            |
+    +==================+===========================+===========================+
+    | ``pH_steps``     | both                      | Region layout + labels    |
+    | ``Eh_steps``     | both                      | Region layout + labels    |
+    | ``geometry_pH_steps`` | ``model`` only       | Analytic boundary sampling|
+    +------------------+---------------------------+---------------------------+
+
+    **``model``:** boundaries are analytic Nernst/pKa curves; ``geometry_pH_steps``
+    controls line smoothness. ``pH_steps`` / ``Eh_steps`` mainly affect which
+    neighbors are detected and how blocky the fill is — use ~25–40 for publication
+    fill, or coarser for ``plot_style="labeled"``.
+
+    **``equilibrium``:** no analytic geometry; ``pH_steps`` / ``Eh_steps`` control
+    both region assignment and boundary placement (finer = more accurate, slower).
+
+    Plot styles
+    -----------
+    ``plot_style="filled"`` (default) — colored regions plus boundary lines.
+
+    ``plot_style="labeled"`` — white background, boundary lines, and each connected
+    predominant region annotated with its species at the region centroid (font size
+    scales with region area). No color legend.
 
     ``progress``
     ------------

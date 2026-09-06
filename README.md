@@ -414,6 +414,7 @@ E = hr.E_at(env)  # Nernst E from concentrations
 
 diagram = Pourbaix(env, pH_steps=30, Eh_steps=30).run()
 diagram.plot(save="pourbaix.png", show=False)
+diagram.plot(plot_style="labeled", save="pourbaix_labeled.png", show=False)
 print(diagram.junction_points[:3])  # species-labeled coordinates in model mode
 ```
 
@@ -424,9 +425,16 @@ print(diagram.junction_points[:3])  # species-labeled coordinates in model mode
 | `model` (default) | Fast | Analytic boundaries + junction points (`geometry_source='analytic'`) | Connected redox ladder per element, known E°/K/pKa, fixed `element_totals` |
 | `equilibrium` | Slow | Dominance grid matrix (`geometry_source='grid'`) | Full coupling, stiff networks, or reactions not parsed by the graph model |
 
-**Grid steps:** `pH_steps` / `Eh_steps` control the colored region grid in **both** modes (finer = less blocky fill). Boundary lines in `model` mode use `geometry_pH_steps` separately. **`progress=True`** prints scan percentage.
+**Grid steps by method:**
 
-**Junction points:** numbered `P1`, `P2`, … — dominant-region coords via `diagram.junction_table()` (default) or full analytic set via `junction_table(source="analytic")`. Plot default: `boundary_mode="dominant"` (lines between neighboring regions only); use `boundary_mode="all"` for every analytic boundary.
+| Parameter | `model` | `equilibrium` |
+|-----------|---------|---------------|
+| `pH_steps`, `Eh_steps` | Region neighbors + fill/labels; ~25–40 for smooth fill | Region layout **and** boundaries; finer = slower |
+| `geometry_pH_steps` | Analytic line sampling (default 200); independent of fill | N/A |
+
+**Plot styles:** `plot_style="filled"` (default) colors each region. `plot_style="labeled"` draws boundaries on a white background and writes the dominant species in each region (font scales with region size; coarser `pH_steps`/`Eh_steps` is usually enough).
+
+**Junction points:** numbered `P1`, `P2`, … — dominant-region coords via `diagram.junction_table()` (default) or full analytic set via `junction_table(source="analytic")`. Plot default: `boundary_mode="dominant"` (smooth clipped lines between neighboring regions, including vertical pH lines); use `boundary_mode="all"` for every analytic boundary.
 
 **Model limits:** ideal dilute Nernst + pKa; independent per-element chains; oligomer/Ksp regions depend on totals and parsed reaction patterns; no cross-element redox.
 

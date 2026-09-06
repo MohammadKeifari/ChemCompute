@@ -172,6 +172,45 @@ def test_analytic_geometry_on_selenium():
     assert diagram.dominant_species_at(7.5, 0.35) in diagram.track_species
 
 
+def test_dominant_boundaries_include_acid_base_verticals():
+    diagram = Pourbaix(
+        selenium_environment(),
+        pH_steps=40,
+        Eh_steps=40,
+        pH_min=0,
+        pH_max=10,
+        Eh_min=-1.0,
+        Eh_max=1.2,
+    ).run()
+    track = diagram.track_species
+    vertical_pairs = {
+        frozenset({"H2SeO3", "HSeO3-"}),
+        frozenset({"HSeO3-", "SeO3-2"}),
+        frozenset({"H2Se", "HSe-"}),
+    }
+    drawn = {
+        frozenset({track[left], track[right]})
+        for left, right, pH_line, _ in diagram.equal_boundary_lines
+        if len(pH_line) >= 2 and abs(float(pH_line[0]) - float(pH_line[-1])) < 1e-9
+    }
+    assert vertical_pairs <= drawn
+
+
+def test_labeled_plot_style_smoke():
+    import matplotlib
+
+    matplotlib.use("Agg")
+    diagram = Pourbaix(
+        selenium_environment(),
+        pH_steps=20,
+        Eh_steps=20,
+        pH_min=0,
+        pH_max=10,
+    ).run()
+    ax = diagram.plot(plot_style="labeled", show=False)
+    assert len(ax.texts) >= 3
+
+
 def test_equilibrium_geometry_source():
     env = selenium_environment()
     diagram = Pourbaix(
