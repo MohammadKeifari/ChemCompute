@@ -1153,6 +1153,48 @@ class TestStrontiumFluoridePurification:
         assert purity2 == pytest.approx(82.73, abs=0.05)
 
 
+class TestRedoxMixtureVsSCE:
+    """Mix A3+/A+, D4+/D2+, and B3+/B+ solutions; closed-system potential vs SCE."""
+
+    def test_mixture_potential_vs_sce_and_final_b3(self):
+        from ChemCompute._half_reaction import F_FARADAY, R_GAS
+
+        n_electrons = 2.0
+        k_ad = math.exp(n_electrons * F_FARADAY * (1.5206 - 1.511) / (R_GAS * 298.0))
+        k_ab = math.exp(n_electrons * F_FARADAY * (1.5206 - 1.5931) / (R_GAS * 298.0))
+        eq_kwargs = dict(method="newton", tol=1e-12, max_iter=8000, min_concentration=1e-20)
+
+        redox = Enviroment(
+            Reaction.from_string("A+3 & D+2 > A+ & D+4", K=k_ad),
+            Reaction.from_string("A+3 & B+ > A+ & B+3", K=k_ab),
+            volume=1e-9,
+        )
+        mixed = (
+            Enviroment.from_compounds({"A+3": 5e-3}, volume=0.050)
+            + Enviroment.from_compounds({"D+2": 2e-3}, volume=0.050)
+            + Enviroment.from_compounds({"A+": 3.5e-3}, volume=0.050)
+            + Enviroment.from_compounds({"B+": 1.5e-3}, volume=0.100)
+            + redox
+        )
+        result = mixed.apply_equilibrium(**eq_kwargs)
+        assert result.criterion_met
+        conc = result.concentrations_dict
+        eh_she = 1.5206 + (R_GAS * mixed.T) / (n_electrons * F_FARADAY) * math.log(
+            conc["A+3"] / conc["A+"]
+        )
+        eh_d = 1.511 + (R_GAS * mixed.T) / (n_electrons * F_FARADAY) * math.log(
+            conc["D+4"] / conc["D+2"]
+        )
+        eh_b = 1.5931 + (R_GAS * mixed.T) / (n_electrons * F_FARADAY) * math.log(
+            conc["B+3"] / conc["B+"]
+        )
+        assert eh_she == pytest.approx(eh_d, abs=1e-8)
+        assert eh_she == pytest.approx(eh_b, abs=1e-8)
+        assert eh_she - 0.241 == pytest.approx(1.2765, abs=1e-4)
+        assert conc["B+3"] == pytest.approx(1.662e-6, rel=1e-3)
+        assert mixed.volume == pytest.approx(0.250, abs=1e-8)
+
+
 # --- Activity ---
 
 
