@@ -1072,6 +1072,9 @@ def test_half_reaction_complex_syntax_and_h_plus_slope():
         E0=-0.55,
     )
     assert hr.net_h_plus_stoichiometry() == 3.0
+    h_plus = next(entry for entry in hr.oxidized if entry["compound"].formula == "H+")
+    assert h_plus["stoichiometric_coefficient"] == 3
+    assert h_plus["rate_dependency"] == 3
     e_low = hr.E_at_pH(0.0)
     e_high = hr.E_at_pH(7.0)
     assert e_high < e_low

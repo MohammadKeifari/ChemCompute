@@ -79,7 +79,7 @@ Use `Reaction.from_string(...)` and `HalfReaction.from_string(...)` with a singl
 | Reaction direction | `>` | `HA > H+ & A-` |
 | Half-reaction sides | `=` | `Ox = Red` |
 | Stoichiometry | prefix `n_` | `3_H+`, `2_@e` |
-| Rate order (Reaction) | suffix `_n` | `A_2` (optional) |
+| Rate order (Reaction) | suffix `_n` | `A_2` (optional; default = stoichiometry) |
 | Phase | suffix | `.aq`, `.s`, `.l`, `.g` |
 | Electrons | `@e` only | never bare `e-` in Reaction |
 

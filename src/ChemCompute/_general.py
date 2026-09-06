@@ -217,7 +217,16 @@ class Compound:
 
     def __hash__(self):
         return hash(self.formula)
-        
+
+
+def _ensure_species_rate_defaults(species_list: list[dict]) -> None:
+    """Fill missing stoichiometric coefficient and rate dependency (order = stoich)."""
+    for species in species_list:
+        stoich = float(species.get("stoichiometric_coefficient", 1))
+        species.setdefault("stoichiometric_coefficient", stoich)
+        species.setdefault("rate_dependency", stoich)
+
+
 class Reaction:
     """
     Represents a reversible chemical reaction with kinetic and equilibrium parameters.
@@ -235,7 +244,7 @@ class Reaction:
         reactants (list[dict]): List of reactant dictionaries, each containing:
             - "stoichiometric_coefficient" (float)
             - "compound" (Compound)
-            - "rate_dependency" (float)
+            - "rate_dependency" (float; defaults to the stoichiometric coefficient)
         products (list[dict]): List of product dictionaries with the same structure.
         K (float): Equilibrium constant of the reaction.
         kf (float): Forward rate constant.
@@ -272,8 +281,10 @@ class Reaction:
         Initialize a Reaction instance.
 
         Args:
-            reactants (list[dict]): List of reactant definitions.
-            products (list[dict]): List of product definitions.
+            reactants (list[dict]): List of reactant definitions. Missing
+                ``rate_dependency`` defaults to the stoichiometric coefficient.
+            products (list[dict]): List of product definitions. Missing
+                ``rate_dependency`` defaults to the stoichiometric coefficient.
             reactants_concentration (list, optional): Initial reactant concentrations
                 (legacy list form, one value per reactant in order). Values may be
                 numeric or :class:`XS`.
@@ -302,6 +313,8 @@ class Reaction:
         self.infinite_K = infinite_K
         self.reactants = reactants
         self.products = products
+        _ensure_species_rate_defaults(self.reactants)
+        _ensure_species_rate_defaults(self.products)
         self.enthalpy = enthalpy
         self.entropy = entropy
         self.activation_energy_forward = activation_energy_forward
@@ -391,7 +404,7 @@ class Reaction:
             "A & 2_B & ... > 3_C & 2_D_-1 & ..."
             - ``&`` separates species on each side; ``>`` separates reactants/products
             - Prefix ``n_`` = stoichiometric coefficient (default 1)
-            - Suffix ``_n`` = rate order (default 1)
+            - Suffix ``_n`` = rate order (defaults to the stoichiometric coefficient)
             - Phases: ``.s``, ``.l``, ``.g``, ``.aq``
             - Ionic charge inferred from trailing ``+`` / ``-`` in species names
 
@@ -429,10 +442,11 @@ class Reaction:
 
                 elif lenght == 2:
                     if re.match(r'^\d+(?:\.\d+)?_[A-Za-z0-9+.\-()]+$' , section) :
+                        stoich = float(splitted_section[0])
                         compound_info = {
-                            "stoichiometric_coefficient" : float(splitted_section[0]),
+                            "stoichiometric_coefficient" : stoich,
                             "compound" : splitted_section[1],
-                            "rate_dependency" : 1
+                            "rate_dependency" : stoich
                         }
 
                     elif re.match(r'^[A-Za-z0-9+.\-()]+_\d+(?:\.\d+)?$' , section) :

@@ -159,6 +159,34 @@ def test_from_string_stoichiometry_and_charge():
     assert "H2" in reaction.products[0]["compound"].formula
 
 
+def test_from_string_rate_dependency_defaults_to_stoichiometry():
+    reaction = Reaction.from_string("2_A & B > 3_C", [1, 1, 0])
+    assert reaction.reactants[0]["stoichiometric_coefficient"] == 2
+    assert reaction.reactants[0]["rate_dependency"] == 2
+    assert reaction.reactants[1]["rate_dependency"] == 1
+    assert reaction.products[0]["stoichiometric_coefficient"] == 3
+    assert reaction.products[0]["rate_dependency"] == 3
+
+
+def test_from_string_explicit_rate_order_overrides_stoichiometry():
+    reaction = Reaction.from_string("2_A_1 & B > C", [1, 1, 0])
+    assert reaction.reactants[0]["stoichiometric_coefficient"] == 2
+    assert reaction.reactants[0]["rate_dependency"] == 1
+
+
+def test_omitted_rate_dependency_defaults_to_stoichiometry():
+    a = Compound("A")
+    b = Compound("B")
+    reaction = Reaction(
+        [{"stoichiometric_coefficient": 2, "compound": a}],
+        [{"stoichiometric_coefficient": 1, "compound": b}],
+        [1.0],
+        [0.0],
+    )
+    assert reaction.reactants[0]["rate_dependency"] == 2
+    assert reaction.products[0]["rate_dependency"] == 1
+
+
 def test_invalid_reaction_string_raises():
     """Ensure invalid reaction strings raise ValueError."""
     with pytest.raises(ValueError):

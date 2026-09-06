@@ -32,6 +32,7 @@ Pass `infinite_K=True` to `Reaction.from_string` when needed.
 | `>` | reactants → products | `HA > H+ & A-` |
 | `=` | oxidized = reduced (half-reaction) | `Fe+3 & @e = Fe+2` |
 | `n_` | stoichiometry prefix | `3_H+`, `2_@e` |
+| `_n` | rate order suffix (default = stoichiometry) | `2_B` is order 2; `2_B_1` is order 1 |
 | `.aq`, `.s`, `.l`, `.g` | phase suffix | `H2O.l`, `Se.s` |
 
 Ionic charge is inferred from trailing `+` / `-` (`H+`, `SeO4-2`). Put charge before phase when both apply: `C-1.l`, not `C.l-1`.

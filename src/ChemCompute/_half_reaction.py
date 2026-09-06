@@ -34,6 +34,9 @@ def _normalize_compound(entry):
         entry["compound"] = compound_from_species_token(compound)
     elif hasattr(compound, "formula"):
         _reject_electron_formula(compound.formula)
+    stoich = float(entry.get("stoichiometric_coefficient", 1))
+    entry.setdefault("stoichiometric_coefficient", stoich)
+    entry.setdefault("rate_dependency", stoich)
     return entry
 
 
@@ -174,10 +177,11 @@ def _parse_section(section: str) -> dict:
         }
     elif len(parts) == 2:
         if re.match(r"^\d+(?:\.\d+)?$", parts[0]):
+            stoich = float(parts[0])
             info = {
-                "stoichiometric_coefficient": float(parts[0]),
+                "stoichiometric_coefficient": stoich,
                 "compound": parts[1] + phase_suffix,
-                "rate_dependency": 1,
+                "rate_dependency": stoich,
             }
         else:
             info = {
