@@ -173,7 +173,7 @@ For basic media, fix `[OH⁻]` instead: `concentrations={"OH-": 1e-2}, buffer=["
 
 Explicit targets are optional: `buffer={"H+": 1e-7}`. Use `env.set_buffer(["H+"])` to re-snapshot after changing concentrations.
 
-This **enforces** constant concentration during the solve. `env.buffer_diagnostics()` only **reports** buffer capacity β(pH) after a calculation—it does not fix pH. `Compound.excess=True` fixes solids/liquids and omits them from Q; buffered H⁺ stays in Q at its fixed value.
+This **enforces** constant concentration during the solve. `env.buffer_diagnostics()` only **reports** buffer capacity β(pH) after a calculation—it does not fix pH. Excess species (`XS(...)` on a reaction or environment concentration entry) fix amount during the solve; solids/liquids are omitted from Q by phase. Buffered H⁺ stays in Q at its fixed value.
 
 ---
 
@@ -229,11 +229,23 @@ Solid (`s`) and liquid (`l`) species are **omitted from Q** with **activity = 1*
 Only `aq` and `g` species participate in the mass-action product Q.
 
 ```python
-h2o = Compound("H2O", phase_point_list=[{"phase": "l", "temperature": 298}], excess=True)
-caf2 = Compound("CaF2", phase_point_list=[{"phase": "s", "temperature": 298}], excess=True)
+from ChemCompute import XS
+
+kw = Reaction.from_string(
+    "H2O.l > H+ & OH-",
+    concentrations={"H2O": XS(55.5), "H+": 1e-7, "OH-": 1e-7},
+    K=1e-14,
+)
+ksp = Reaction.from_string(
+    "CaF2.s > Ca+2 & 2_F-",
+    concentrations={"CaF2": XS(10.0)},
+    K=5e-9,
+)
+env = Enviroment(kw, ksp)
+# Excess lives next to concentration: reaction entries and env.compounds_concentration / env.excess_dict
 ```
 
-`excess=True` keeps that species' concentration **fixed** during the solve (large reservoir of solid or solvent). It does not multiply K by the bulk molarity.
+`XS(amount)` keeps that species' concentration **fixed** during the solve (large reservoir of solid or solvent). It does not multiply K by the bulk molarity. Phase `s`/`l` still omit the species from Q (activity 1).
 
 ### Advanced reaction options
 

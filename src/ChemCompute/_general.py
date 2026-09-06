@@ -52,8 +52,6 @@ def _apply_concentration_map(entries: list[dict], concentration_map: dict) -> No
         concentration, excess = _resolve_concentration_spec(spec, current=0.0)
         entry["concentration"] = concentration
         entry["excess"] = excess
-        if excess:
-            entry["compound"].excess = True
 
 
 def _apply_concentration_list(entries: list[dict], values: list) -> None:
@@ -62,8 +60,6 @@ def _apply_concentration_list(entries: list[dict], values: list) -> None:
         concentration, excess = _resolve_concentration_spec(spec, current=0.0)
         entry["concentration"] = concentration
         entry["excess"] = excess
-        if excess:
-            entry["compound"].excess = True
 
 
 def _filter_pourbaix_reserved_concentrations(concentrations, *, T=298):
@@ -97,7 +93,7 @@ class Compound:
         bp (float | None): Boiling point of the compound.
     """
 
-    def __init__(self , formula  , phase_point_list=None , mp=None, bp=None ,scription=True, excess=False, charge=0):
+    def __init__(self , formula  , phase_point_list=None , mp=None, bp=None ,scription=True, charge=0):
         """
         Initialize a Compound object based on its formula, phase information, and thermal properties.
 
@@ -109,8 +105,6 @@ class Compound:
             mp (float, optional): Melting point temperature.
             bp (float, optional): Boiling point temperature.
             scription (bool, optional): If True, converts the formula into Unicode with subscripts/superscripts.
-            excess (bool, optional): If True, treat as constant activity (typically solid/liquid
-                in large excess). Concentration is fixed during equilibrium calculations.
             charge (int, optional): Ionic charge for activity-coefficient calculations. Default 0.
         
         Raises:
@@ -173,7 +167,6 @@ class Compound:
                     raise ValueError("The acceptable inputs for phase are s / l / g / aq")
         self.mp = mp
         self.bp = bp
-        self.excess = excess
         self.charge = int(charge)
 
     def phase(self , temperature):
@@ -259,7 +252,7 @@ class Reaction:
         activation_energy_backward (float): Activation energy of the backward reaction
             (J/mol). Used in Arrhenius equation for temperature-dependent rate constant.
         compounds (list[dict]): All involved species (reactants and products) with
-            their concentration and type ("reactant" or "product").
+            their concentration, excess flag, and type ("reactant" or "product").
     """
     def __init__(self,
                  reactants : list[dict] ,
@@ -780,6 +773,7 @@ class Enviroment():
         compounds_concentration (list[dict]): List of dictionaries, each with:
             - "compound" (Compound): Compound object.
             - "concentration" (float): Current concentration value.
+            - "excess" (bool): If True, that species' amount is held fixed in equilibrium.
         compounds (list[Compound]): Unique list of all compounds appearing in any reaction.
         T (float): System temperature in Kelvin.
     """
@@ -835,7 +829,8 @@ class Enviroment():
             concentrations (dict, optional): Override or set species concentrations by
                 formula string or Compound key. Overrides values summed from reactions.
                 Use :data:`XS` to mark a species as excess without changing its amount,
-                or call :meth:`set_excess` after construction.
+                or call :meth:`set_excess` after construction. Excess is stored on the
+                environment next to concentration, not on :class:`Compound`.
             volume (float, optional): Solution volume in litres. Default 1.0.
             buffer (list, set, or dict, optional): Species held at fixed concentration during
                 equilibrium and kinetics. Use ``buffer=["H+"]`` with ``concentrations={"H+": ...}``
@@ -907,6 +902,7 @@ class Enviroment():
 
         Args:
             concentrations (dict): Mapping of Compound or formula str to concentration (mol/L).
+                Values may be numeric or :class:`XS` to mark excess.
             buffer (list, set, or dict, optional): Species held at fixed concentration. See
                 :meth:`__init__` for constant-pH usage with ``buffer=["H+"]``.
         """
@@ -930,9 +926,10 @@ class Enviroment():
         env.compounds_concentration = []
         for key, concentration in concentrations.items():
             compound = _resolve_compound_key(key, T)
+            amount, excess = _resolve_concentration_spec(concentration, current=0.0)
             env.compounds.append(compound)
             env.compounds_concentration.append(
-                {"compound": compound, "concentration": float(concentration)}
+                {"compound": compound, "concentration": amount, "excess": excess}
             )
         env._buffer_spec = env._normalize_buffer_spec(buffer)
         env._resolve_buffer_targets()
@@ -978,7 +975,7 @@ class Enviroment():
                 compound = _resolve_compound_key(formula, self.T)
                 self.compounds.append(compound)
                 self.compounds_concentration.append(
-                    {"compound": compound, "concentration": explicit}
+                    {"compound": compound, "concentration": explicit, "excess": False}
                 )
                 targets[formula] = explicit
             else:
@@ -1052,16 +1049,19 @@ class Enviroment():
                     f"Concentration override for {formula!r} must be numeric or XS."
                 )
             if mark_excess:
-                self.compounds[index].excess = True
+                self.compounds_concentration[index]["excess"] = True
         else:
             if _is_xs(value) and (not isinstance(value, XS) or value.amount is None):
                 raise ValueError(
                     f"Cannot use XS() for {formula!r}; species is not in the environment."
                 )
-            compound.excess = mark_excess
             self.compounds.append(compound)
             self.compounds_concentration.append(
-                {"compound": compound, "concentration": resolved_value if resolved_value is not None else 0.0}
+                {
+                    "compound": compound,
+                    "concentration": resolved_value if resolved_value is not None else 0.0,
+                    "excess": mark_excess,
+                }
             )
 
     def _apply_concentration_overrides(self, concentrations, *, allow_pourbaix_reserved=False):
@@ -1078,7 +1078,7 @@ class Enviroment():
         Set concentrations and mark species as excess (fixed activity).
 
         Values may be numeric (mol/L) or :data:`XS` to keep the current amount and
-        only set ``Compound.excess = True``.
+        only mark the environment concentration entry as excess.
 
         Example::
 
@@ -1298,18 +1298,16 @@ class Enviroment():
                     index_in_compounds_concentration = compounds.index(compound["compound"])
                     self.compounds_concentration[index_in_compounds_concentration]["concentration"] += reaction.compounds[index_in_reaction]["concentration"]
                     if entry_excess:
-                        self.compounds[index_in_compounds_concentration].excess = True
+                        self.compounds_concentration[index_in_compounds_concentration]["excess"] = True
                 else:
                     self.compounds_concentration.append(
                         {
                             "compound": compound["compound"],
                             "concentration": reaction.compounds[index_in_reaction]["concentration"],
+                            "excess": bool(entry_excess),
                         }
                     )
-                    appended = compound["compound"]
-                    if entry_excess:
-                        appended.excess = True
-                    self.compounds.append(appended)
+                    self.compounds.append(compound["compound"])
 
         for entry in self.compounds_concentration:
             compound = entry["compound"]
@@ -1611,6 +1609,23 @@ class Enviroment():
             ``{formula: concentration}`` for every compound in the environment.
         """
         return dict(zip(self.compound_labels, self.concentrations))
+
+    @property
+    def excess_dict(self) -> dict[str, bool]:
+        """Map formula labels to whether that species is marked excess in this environment."""
+        return {
+            label: bool(entry.get("excess", False))
+            for label, entry in zip(self.compound_labels, self.compounds_concentration)
+        }
+
+    @property
+    def excess_indices(self):
+        """Compound indices whose environment concentration is marked excess."""
+        return [
+            index
+            for index, entry in enumerate(self.compounds_concentration)
+            if entry.get("excess", False)
+        ]
 
     def equilibrium(
         self,

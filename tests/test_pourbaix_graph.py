@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from ChemCompute import Compound, Enviroment, HalfReaction, Pourbaix, Reaction
+from ChemCompute import Compound, Enviroment, HalfReaction, Pourbaix, Reaction, XS
 from ChemCompute._pourbaix_graph import (
     boundary_Eh,
     build_pourbaix_graph,
@@ -54,14 +54,14 @@ def test_fe_pourbaix_smoke():
         concentrations=[0.01, 0.001],
         E0=0.771,
     )
-    water = Compound("H2O", excess=True)
+    water = Compound("H2O")
     kw = Reaction(
         reactants=[{"stoichiometric_coefficient": 1, "compound": water, "rate_dependency": 0}],
         products=[
             {"stoichiometric_coefficient": 1, "compound": aq("H+"), "rate_dependency": 1},
             {"stoichiometric_coefficient": 1, "compound": aq("OH-"), "rate_dependency": 1},
         ],
-        reactants_concentration=[0.0],
+        reactants_concentration=[XS(0.0)],
         products_concentration=[0.0, 0.0],
         K=1e-14,
     )

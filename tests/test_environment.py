@@ -412,7 +412,7 @@ def test_pre_existing_solid_increases_during_precipitation(solid_with_initial_am
 def test_excess_compound_concentration_fixed_during_equilibrium():
     from ChemCompute._equilibrium import _build_context
 
-    h2o = Compound("H2O", phase_point_list=[{"phase": "l", "temperature": 298}], excess=True)
+    h2o = Compound("H2O", phase_point_list=[{"phase": "l", "temperature": 298}])
     hp = Compound("H+", phase_point_list=[{"phase": "aq", "temperature": 298}])
     ohm = Compound("OH-", phase_point_list=[{"phase": "aq", "temperature": 298}])
     rxn = Reaction(
@@ -421,7 +421,7 @@ def test_excess_compound_concentration_fixed_during_equilibrium():
             {"stoichiometric_coefficient": 1, "compound": hp, "rate_dependency": 1},
             {"stoichiometric_coefficient": 1, "compound": ohm, "rate_dependency": 1},
         ],
-        [55.5],
+        [XS(55.5)],
         [1e-7, 1e-7],
         K=1e-14,
     )
@@ -459,7 +459,8 @@ def test_set_excess_with_xs_keeps_concentration():
     env.set_excess({"H2O": XS()})
 
     assert rxn.compounds[0]["excess"] is False
-    assert env.compounds[0].excess is True
+    assert env.excess_dict["H2O"] is True
+    assert env.compounds_concentration[0]["excess"] is True
     assert env.concentrations_dict["H2O"] == 55.5
 
     result = env.equilibrium(method="newton", tol=1e-12, return_details=True)
@@ -489,7 +490,7 @@ def test_reaction_concentrations_dict_xs_marks_excess_on_entry():
     assert rxn.compounds[0]["concentration"] == 55.5
 
     env = Enviroment(rxn, T=298)
-    assert env.compounds[0].excess is True
+    assert env.excess_dict["H2O"] is True
     result = env.equilibrium(method="newton", tol=1e-12, return_details=True)
     assert result.concentrations_dict["H2O"] == 55.5
 
@@ -506,7 +507,7 @@ def test_reaction_concentrations_list_xs_marks_excess_on_entry():
     assert rxn.compounds[0]["concentration"] == 55.5
 
     env = Enviroment(rxn, T=298)
-    assert env.compounds[0].excess is True
+    assert env.excess_dict["H2O"] is True
     result = env.equilibrium(method="newton", tol=1e-12, return_details=True)
     assert result.concentrations_dict["H2O"] == 55.5
 
@@ -533,7 +534,7 @@ def test_concentrations_dict_accepts_xs_at_init():
     )
     env = Enviroment(rxn, T=298)
     assert rxn.compounds[0]["excess"] is True
-    assert env.compounds[0].excess is True
+    assert env.excess_dict["CaF2"] is True
     assert env.concentrations_dict["CaF2"] == 10.0
 
 
@@ -666,6 +667,12 @@ class TestFromCompounds:
         assert np.isclose(env.concentrations_dict["Cl-"], 0.1)
         assert env.volume == 1.0
 
+    def test_xs_marks_environment_excess(self):
+        env = Enviroment.from_compounds({"H2O": XS(55.5), "Na+": 0.1}, volume=1.0)
+        assert env.excess_dict["H2O"] is True
+        assert env.excess_dict["Na+"] is False
+        assert env.concentrations_dict["H2O"] == 55.5
+
     def test_equilibrium_no_reactions(self):
         env = Enviroment.from_compounds({"A": 0.5}, volume=1.0)
         result = env.equilibrium(return_details=True)
@@ -730,6 +737,16 @@ class TestEnvironmentMixing:
         env_fn = Enviroment.combine((0.5, envA), (4.0, envB))
         assert np.isclose(env_op.volume, env_fn.volume)
         assert env_op.concentrations_dict == env_fn.concentrations_dict
+
+    def test_mix_ors_excess_flags(self):
+        env_a = Enviroment.from_compounds({"H2O": XS(55.5)}, volume=1.0)
+        env_b = Enviroment.from_compounds({"Na+": 0.1, "H2O": 55.5}, volume=1.0)
+        combined = env_a + env_b
+        assert combined.excess_dict["H2O"] is True
+        assert combined.excess_dict["Na+"] is False
+        assert combined.compounds_concentration[
+            combined.compound_labels.index("H2O")
+        ]["excess"] is True
 
     def test_add_compounds_slug(self):
         envB = Enviroment.from_compounds({"B": 0.1}, volume=1.0)
@@ -1440,14 +1457,14 @@ def test_pourbaix_grid_run():
         concentrations=[0.01, 0.001],
         E0=0.771,
     )
-    water = Compound("H2O", excess=True)
+    water = Compound("H2O", phase_point_list=[{"phase": "l", "temperature": 298}])
     kw = Reaction(
         reactants=[{"stoichiometric_coefficient": 1, "compound": water, "rate_dependency": 0}],
         products=[
             {"stoichiometric_coefficient": 1, "compound": aq("H+", charge=1), "rate_dependency": 1},
             {"stoichiometric_coefficient": 1, "compound": aq("OH-", charge=-1), "rate_dependency": 1},
         ],
-        reactants_concentration=[0.0],
+        reactants_concentration=[XS(0.0)],
         products_concentration=[0.0, 0.0],
         K=1e-14,
     )

@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from ChemCompute import Compound, Enviroment, HalfReaction, Pourbaix, Reaction
+from ChemCompute import Compound, Enviroment, HalfReaction, Pourbaix, Reaction, XS
 from ChemCompute._pourbaix_graph import build_pourbaix_graph, element_totals_from_env, graph_speciation
 
 POURBAIX_OUTPUT_DIR = Path(__file__).resolve().parent.parent / "manual_test_output" / "pourbaix"
@@ -41,14 +41,14 @@ def ka(acid: str, base: str, pka: float) -> Reaction:
 
 def selenium_environment(c_tot: float = 1.0) -> Enviroment:
     """Selenium Pourbaix reference system (C_tot Se = 1 M by default)."""
-    water = Compound("H2O", excess=True, phase_point_list=[{"phase": "l", "temperature": 298}])
+    water = Compound("H2O", phase_point_list=[{"phase": "l", "temperature": 298}])
     kw = Reaction(
         reactants=[{"stoichiometric_coefficient": 1, "compound": water, "rate_dependency": 0}],
         products=[
             {"stoichiometric_coefficient": 1, "compound": aq("H+"), "rate_dependency": 1},
             {"stoichiometric_coefficient": 1, "compound": aq("OH-"), "rate_dependency": 1},
         ],
-        reactants_concentration=[0.0],
+        reactants_concentration=[XS(0.0)],
         products_concentration=[0.0, 0.0],
         K=1e-14,
     )
@@ -93,14 +93,14 @@ def carbon_environment(c_tot: float = 1e-3) -> Enviroment:
 
     Acid-base: Kh(CO2/H2CO3)=1.7e-3; pKa H2CO3 6.4/10.3; H2C2O4 1.3/4.2; HCO2H 3.7.
     """
-    water = Compound("H2O", excess=True, phase_point_list=[{"phase": "l", "temperature": 298}])
+    water = Compound("H2O", phase_point_list=[{"phase": "l", "temperature": 298}])
     kw = Reaction(
         reactants=[{"stoichiometric_coefficient": 1, "compound": water, "rate_dependency": 0}],
         products=[
             {"stoichiometric_coefficient": 1, "compound": aq("H+"), "rate_dependency": 1},
             {"stoichiometric_coefficient": 1, "compound": aq("OH-"), "rate_dependency": 1},
         ],
-        reactants_concentration=[0.0],
+        reactants_concentration=[XS(0.0)],
         products_concentration=[0.0, 0.0],
         K=1e-14,
     )
@@ -197,14 +197,14 @@ def iron_environment(c_tot: float = 1e-3) -> Enviroment:
     Fe(OH)3(s) Ksp = [Fe+3][OH-]^3 = 1e-38
     (exam writes Fe+3 + 3 H2O ⇌ Fe(OH)3(s) + 3 H+ as that Ksp).
     """
-    water = Compound("H2O", excess=True, phase_point_list=[{"phase": "l", "temperature": 298}])
+    water = Compound("H2O", phase_point_list=[{"phase": "l", "temperature": 298}])
     kw = Reaction(
         reactants=[{"stoichiometric_coefficient": 1, "compound": water, "rate_dependency": 0}],
         products=[
             {"stoichiometric_coefficient": 1, "compound": aq("H+"), "rate_dependency": 1},
             {"stoichiometric_coefficient": 1, "compound": aq("OH-"), "rate_dependency": 1},
         ],
-        reactants_concentration=[0.0],
+        reactants_concentration=[XS(0.0)],
         products_concentration=[0.0, 0.0],
         K=1e-14,
     )
@@ -270,14 +270,14 @@ def amt_environment(c_tot: float = 1.0) -> Enviroment:
 
     pKa = 14 − pKb: AMTH+ 9.0, AMTOH+2 6.0, AMTRH2+2 5.5, AMTRH+ 9.8.
     """
-    water = Compound("H2O", excess=True, phase_point_list=[{"phase": "l", "temperature": 298}])
+    water = Compound("H2O", phase_point_list=[{"phase": "l", "temperature": 298}])
     kw = Reaction(
         reactants=[{"stoichiometric_coefficient": 1, "compound": water, "rate_dependency": 0}],
         products=[
             {"stoichiometric_coefficient": 1, "compound": aq("H+"), "rate_dependency": 1},
             {"stoichiometric_coefficient": 1, "compound": aq("OH-"), "rate_dependency": 1},
         ],
-        reactants_concentration=[0.0],
+        reactants_concentration=[XS(0.0)],
         products_concentration=[0.0, 0.0],
         K=1e-14,
     )

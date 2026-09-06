@@ -1,6 +1,6 @@
 """Shared builders for environment tests."""
 
-from ChemCompute import Compound, Enviroment, Reaction
+from ChemCompute import Compound, Enviroment, Reaction, XS
 
 
 def aq(formula, **kwargs):
@@ -22,7 +22,7 @@ def simple_rxn(initial_a=1.0, initial_b=0.0, K=2.0):
 def water_env(h_plus=1e-7, oh_minus=1e-7, volume=0.1):
     h = aq("H+", charge=1)
     oh = aq("OH-", charge=-1)
-    water = Compound("H2O", excess=True, phase_point_list=[{"phase": "l", "temperature": 298}])
+    water = Compound("H2O", phase_point_list=[{"phase": "l", "temperature": 298}])
     rxn = Reaction(
         reactants=[
             {"stoichiometric_coefficient": 1, "compound": h, "rate_dependency": 1},
@@ -30,7 +30,7 @@ def water_env(h_plus=1e-7, oh_minus=1e-7, volume=0.1):
         ],
         products=[{"stoichiometric_coefficient": 1, "compound": water, "rate_dependency": 0}],
         reactants_concentration=[h_plus, oh_minus],
-        products_concentration=[0.0],
+        products_concentration=[XS(0.0)],
         K=1e-14,
     )
     return Enviroment(
@@ -68,7 +68,7 @@ def ammonia_buffer_env():
     nh3 = aq("NH3")
     h = aq("H+", charge=1)
     oh = aq("OH-", charge=-1)
-    water = Compound("H2O", excess=True)
+    water = Compound("H2O")
     ka = 5.6e-10
     rxn1 = Reaction(
         reactants=[{"stoichiometric_coefficient": 1, "compound": nh4, "rate_dependency": 1}],
@@ -87,7 +87,7 @@ def ammonia_buffer_env():
         ],
         products=[{"stoichiometric_coefficient": 1, "compound": water, "rate_dependency": 0}],
         reactants_concentration=[1e-9, 1e-7],
-        products_concentration=[0.0],
+        products_concentration=[XS(0.0)],
         K=1e-14,
     )
     return Enviroment(rxn1, rxn2)

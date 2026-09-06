@@ -95,6 +95,7 @@ def combine_environments(*terms):
 
     compound_objects = {}
     mole_totals = {}
+    excess_flags = {}
     merged_reactions = []
     charge_map = {}
     spectra = {}
@@ -104,9 +105,11 @@ def combine_environments(*terms):
         charge_map.update(env.charge_map)
         spectra.update(env.spectra)
         effective_volume = coeff * env.volume
+        env_excess = getattr(env, "excess_dict", {})
         for formula, concentration in env.concentrations_dict.items():
             compound_objects[formula] = env.compounds[env.compound_labels.index(formula)]
             mole_totals[formula] = mole_totals.get(formula, 0.0) + concentration * effective_volume
+            excess_flags[formula] = excess_flags.get(formula, False) or env_excess.get(formula, False)
 
     combined = Enviroment.__new__(Enviroment)
     combined.reactions = merged_reactions
@@ -126,6 +129,7 @@ def combine_environments(*terms):
             {
                 "compound": compound_objects[formula],
                 "concentration": mole_totals[formula] / total_effective_volume,
+                "excess": excess_flags.get(formula, False),
             }
         )
 

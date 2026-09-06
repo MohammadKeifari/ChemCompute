@@ -186,10 +186,12 @@ def _build_context(env, min_concentration: float) -> EquilibriumContext:
     lnK = np.log(K_vec)
     infinite_k_mask = np.array([getattr(rxn, "infinite_K", False) for rxn in env.reactions], dtype=bool)
     excess_source_mask = np.zeros(R, dtype=bool)
+    env_excess = getattr(env, "excess_dict", {})
     for i, rxn in enumerate(env.reactions):
         for species in rxn.reactants + rxn.products:
             compound = species["compound"]
-            if species.get("excess", False) or getattr(compound, "excess", False):
+            formula = compound.formula if hasattr(compound, "formula") else str(compound)
+            if species.get("excess", False) or env_excess.get(formula, False):
                 excess_source_mask[i] = True
                 break
 
@@ -199,13 +201,8 @@ def _build_context(env, min_concentration: float) -> EquilibriumContext:
             # Pure solids and liquids use activity = 1: omit from Q, leave K unchanged
             # (e.g. Kw = [H+][OH-], Ksp = [Ca2+][F-]^2 with no H2O or CaF2 terms).
             A[:, j] = 0.0
-        if getattr(compound, "excess", False):
+        if env.compounds_concentration[j].get("excess", False):
             S[j, :] = 0.0
-        for rxn in env.reactions:
-            for species in rxn.reactants + rxn.products:
-                if species["compound"] is compound and species.get("excess", False):
-                    S[j, :] = 0.0
-                    break
 
     for j in getattr(env, "buffer_indices", []):
         S[j, :] = 0.0
