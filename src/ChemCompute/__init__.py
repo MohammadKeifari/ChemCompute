@@ -1,7 +1,17 @@
 from ._general import *
 from ._equilibrium import EquilibriumResult
 from ._half_reaction import HalfReaction, BoundaryLine
-from ._pourbaix import Pourbaix, PourbaixResult
+from ._pourbaix import Pourbaix, PourbaixMetadata, PourbaixResult, infer_pourbaix_metadata
+from ._pourbaix_graph import (
+    PourbaixBoundary,
+    PourbaixGraph,
+    PourbaixJunction,
+    boundary_Eh,
+    build_pourbaix_graph,
+    format_junction_label,
+    format_junction_plot_label,
+    graph_speciation,
+)
 from ._activity import ActivityModel, VALID_ACTIVITY_MODELS, ionic_strength, resolve_charge
 from ._buffer import BufferDiagnostics, BufferPairDiagnostics, buffer_diagnostics
 from ._mixing import ScaledEnviroment, combine_environments

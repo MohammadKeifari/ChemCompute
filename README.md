@@ -412,8 +412,31 @@ env.equilibrium()
 
 E = hr.E_at(env)  # Nernst E from concentrations
 
-diagram = Pourbaix(env, track_species=["Fe+3", "Fe+2"], pH_steps=30, Eh_steps=30).run()
-diagram.plot_boundaries(save="pourbaix.png", show=False)
+diagram = Pourbaix(env, pH_steps=30, Eh_steps=30).run()
+diagram.plot(save="pourbaix.png", show=False)
+print(diagram.junction_points[:3])  # species-labeled coordinates in model mode
+```
+
+### Speciation methods
+
+| Method | Speed | Saved geometry | Use when |
+|--------|-------|----------------|----------|
+| `model` (default) | Fast | Analytic boundaries + junction points (`geometry_source='analytic'`) | Connected redox ladder per element, known E°/K/pKa, fixed `element_totals` |
+| `equilibrium` | Slow | Dominance grid matrix (`geometry_source='grid'`) | Full coupling, stiff networks, or reactions not parsed by the graph model |
+
+**Grid steps:** `pH_steps` / `Eh_steps` control the colored region grid in **both** modes (finer = less blocky fill). Boundary lines in `model` mode use `geometry_pH_steps` separately. **`progress=True`** prints scan percentage.
+
+**Junction points:** numbered `P1`, `P2`, … — dominant-region coords via `diagram.junction_table()` (default) or full analytic set via `junction_table(source="analytic")`. Plot default: `boundary_mode="dominant"` (lines between neighboring regions only); use `boundary_mode="all"` for every analytic boundary.
+
+**Model limits:** ideal dilute Nernst + pKa; independent per-element chains; oligomer/Ksp regions depend on totals and parsed reaction patterns; no cross-element redox.
+
+```python
+from ChemCompute import Pourbaix, build_pourbaix_graph
+
+graph = build_pourbaix_graph(env)
+diagram = Pourbaix(env, element_totals={"Se": 1.0}, speciation_method="model").run()
+for junction in diagram.junction_points:
+    print(junction.label, junction.pH, junction.Eh)
 ```
 
 Complex syntax uses `=` and `&`:

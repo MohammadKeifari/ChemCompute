@@ -1079,15 +1079,25 @@ def test_pourbaix_grid_run():
         concentrations=[0.01, 0.001],
         E0=0.771,
     )
-    h = aq("H+", charge=1)
+    water = Compound("H2O", excess=True)
+    kw = Reaction(
+        reactants=[{"stoichiometric_coefficient": 1, "compound": water, "rate_dependency": 0}],
+        products=[
+            {"stoichiometric_coefficient": 1, "compound": aq("H+", charge=1), "rate_dependency": 1},
+            {"stoichiometric_coefficient": 1, "compound": aq("OH-", charge=-1), "rate_dependency": 1},
+        ],
+        reactants_concentration=[0.0],
+        products_concentration=[0.0, 0.0],
+        K=1e-14,
+    )
     env = Enviroment(
+        kw,
         hr,
-        concentrations={"H+": 1e-7},
+        concentrations={"Fe+3": 0.01, "Fe+2": 0.001},
         buffer=["H+"],
     )
     diagram = Pourbaix(
         env,
-        track_species=["Fe+3", "Fe+2"],
         pH_steps=5,
         Eh_steps=5,
         pH_min=1,
@@ -1097,6 +1107,8 @@ def test_pourbaix_grid_run():
     ).run()
     assert diagram.grid_dominant.shape == (5, 5)
     assert len(diagram.boundary_lines) == 1
+    assert diagram.speciation is not None
+    assert diagram.track_species == ["Fe+3", "Fe+2"]
 
 
 # --- Bio kinetics ---

@@ -1,6 +1,30 @@
 import re
 import math
+import warnings
 import numpy as np
+
+POURBAIX_RESERVED_SPECIES = frozenset({"H+", "OH-"})
+
+
+def _filter_pourbaix_reserved_concentrations(concentrations, *, T=298):
+    """Drop reserved pH species from user-supplied concentration maps."""
+    from ._mixing import _resolve_compound_key
+
+    filtered = {}
+    for key, value in concentrations.items():
+        if isinstance(key, str):
+            formula = key
+        else:
+            formula = _resolve_compound_key(key, T).formula
+        if formula in POURBAIX_RESERVED_SPECIES:
+            warnings.warn(
+                f"Ignoring assigned concentration for reserved species {formula!r}; "
+                "Pourbaix and constant-pH workflows control H+ and OH-.",
+                stacklevel=3,
+            )
+            continue
+        filtered[key] = value
+    return filtered
 class Compound: 
     """
     Represents a chemical compound with formula, physical properties, and optional superscript/subscript formatting.
@@ -927,7 +951,9 @@ class Enviroment():
         self.compounds_concentration = []
         self._rebuild_compound_list()
         if concentrations:
-            self._apply_concentration_overrides(concentrations)
+            self._apply_concentration_overrides(
+                _filter_pourbaix_reserved_concentrations(concentrations, T=T)
+            )
         self._buffer_spec = self._normalize_buffer_spec(buffer)
         self._resolve_buffer_targets()
         self._last_equilibrium_result = None
@@ -1053,13 +1079,19 @@ class Enviroment():
         labels = self.compound_labels
         return [labels.index(formula) for formula in self._buffer_targets]
 
-    def _apply_concentration_overrides(self, concentrations):
+    def _apply_concentration_overrides(self, concentrations, *, allow_pourbaix_reserved=False):
         """Apply concentration dict; overrides reaction-derived values."""
         from ._mixing import _resolve_compound_key
 
         for key, value in concentrations.items():
             compound = _resolve_compound_key(key, self.T)
             formula = compound.formula
+            if formula in POURBAIX_RESERVED_SPECIES and not allow_pourbaix_reserved:
+                raise ValueError(
+                    f"{formula!r} is reserved for Pourbaix / constant-pH workflows. "
+                    "Set it with set_buffer(['H+']) and apply_pourbaix_state(...), "
+                    "or pass allow_pourbaix_reserved=True internally."
+                )
             if formula in self.compound_labels:
                 index = self.compound_labels.index(formula)
                 self.compounds_concentration[index]["concentration"] = float(value)
