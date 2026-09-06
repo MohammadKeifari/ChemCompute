@@ -698,6 +698,21 @@ def graph_speciation(
     return merged, best_index
 
 
+def boundary_species_at_pH(boundary: PourbaixBoundary, pH: float, graph: PourbaixGraph) -> tuple[str, str]:
+    """Species in equilibrium along ``boundary`` at ``pH``."""
+    if boundary.kind == "acid_base":
+        return boundary.left, boundary.right
+    if boundary.kind == "redox":
+        for chain in graph.chains:
+            if chain.element != boundary.chain_element:
+                continue
+            level_low, level_high = boundary.level_pair
+            left = _prevalent_form(pH, chain.oxidation_levels[level_low], chain.pka_pairs)
+            right = _prevalent_form(pH, chain.oxidation_levels[level_high], chain.pka_pairs)
+            return left, right
+    return boundary.left, boundary.right
+
+
 def _interpolate_eh(boundary: PourbaixBoundary, pH: float) -> float:
     if len(boundary.pH) == 1:
         return float(boundary.Eh[0])

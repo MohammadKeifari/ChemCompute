@@ -16,6 +16,7 @@ from ._pourbaix_graph import (
     PourbaixGraph,
     PourbaixJunction,
     assign_junction_point_ids,
+    boundary_species_at_pH,
     build_pourbaix_graph,
     compute_analytic_geometry,
     element_totals_from_env,
@@ -118,46 +119,203 @@ def _adjacent_species_pairs(grid_dominant: np.ndarray) -> set[tuple[int, int]]:
     return pairs
 
 
-def _dominant_region_boundaries(
-    grid_pH: np.ndarray,
-    grid_Eh: np.ndarray,
+def _split_active_segments(
+    pH: np.ndarray,
+    Eh: np.ndarray,
+    active: np.ndarray,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    segments: list[tuple[np.ndarray, np.ndarray]] = []
+    start: Optional[int] = None
+    for index, include in enumerate(active):
+        if include and start is None:
+            start = index
+        elif not include and start is not None:
+            segments.append((pH[start:index], Eh[start:index]))
+            start = None
+    if start is not None:
+        segments.append((pH[start:], Eh[start:]))
+    return segments
+
+
+def _on_dominant_interface(
+    pH: float,
+    Eh: float,
+    idx_a: int,
+    idx_b: int,
+    graph: PourbaixGraph,
+    totals: dict[str, float],
+    track_species: Sequence[str],
+    *,
+    background_ions: Optional[dict[str, float]] = None,
+) -> bool:
+    """True when (pH, Eh) lies on the border between two dominant region species."""
+    label_to_index = {name: index for index, name in enumerate(track_species)}
+
+    def dominant_index(ph: float, eh: float) -> int:
+        _, index = graph_speciation(
+            ph,
+            eh,
+            graph,
+            totals,
+            background_ions=background_ions,
+        )
+        name = graph.all_track_species[index]
+        return label_to_index.get(name, -1)
+
+    seen = {
+        dominant_index(pH, Eh),
+        dominant_index(pH, Eh + 1e-3),
+        dominant_index(pH, Eh - 1e-3),
+        dominant_index(pH + 1e-3, Eh),
+        dominant_index(pH - 1e-3, Eh),
+    }
+    seen.discard(-1)
+    return idx_a in seen and idx_b in seen
+
+
+def _clip_curve_to_dominant_pair(
+    pH_curve: np.ndarray,
+    eh_curve: np.ndarray,
+    idx_a: int,
+    idx_b: int,
+    name_a: str,
+    name_b: str,
+    boundary: PourbaixBoundary,
+    graph: PourbaixGraph,
+    totals: dict[str, float],
+    track_species: Sequence[str],
+    *,
+    pH_min: float,
+    pH_max: float,
+    eh_min: float,
+    eh_max: float,
+    background_ions: Optional[dict[str, float]] = None,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    active = np.zeros(len(pH_curve), dtype=bool)
+    target = {name_a, name_b}
+    for index in range(len(pH_curve)):
+        pH = float(pH_curve[index])
+        Eh = float(eh_curve[index])
+        if pH < pH_min or pH > pH_max or Eh < eh_min or Eh > eh_max:
+            continue
+        left, right = boundary_species_at_pH(boundary, pH, graph)
+        if {left, right} != target:
+            continue
+        if not _on_dominant_interface(
+            pH,
+            Eh,
+            idx_a,
+            idx_b,
+            graph,
+            totals,
+            track_species,
+            background_ions=background_ions,
+        ):
+            continue
+        active[index] = True
+    return _split_active_segments(pH_curve, eh_curve, active)
+
+
+def _dominant_analytic_boundary_lines(
     grid_dominant: np.ndarray,
+    track_species: Sequence[str],
+    analytic_boundaries: Sequence[PourbaixBoundary],
+    graph: PourbaixGraph,
+    totals: dict[str, float],
+    *,
+    pH_min: float,
+    pH_max: float,
+    eh_min: float,
+    eh_max: float,
+    background_ions: Optional[dict[str, float]] = None,
 ) -> list[tuple[int, int, np.ndarray, np.ndarray]]:
     """
-    Boundary segments between species that share an edge on the predominance grid.
+    Smooth analytic equilibrium curves, clipped to segments where the pair
+    separates neighboring predominant regions on the diagram.
     """
-    from collections import defaultdict
-
-    segments_by_pair: dict[tuple[int, int], list[tuple[tuple[float, float], tuple[float, float]]]] = defaultdict(list)
-    n_pH, n_eh = grid_dominant.shape
-
-    for i in range(n_pH):
-        for j in range(n_eh - 1):
-            left_index = int(grid_dominant[i, j])
-            right_index = int(grid_dominant[i, j + 1])
-            if left_index == right_index:
-                continue
-            pair = (min(left_index, right_index), max(left_index, right_index))
-            pH = float(grid_pH[i])
-            segments_by_pair[pair].append(
-                ((pH, float(grid_Eh[j])), (pH, float(grid_Eh[j + 1])))
-            )
-
-    for i in range(n_pH - 1):
-        for j in range(n_eh):
-            lower_index = int(grid_dominant[i, j])
-            upper_index = int(grid_dominant[i + 1, j])
-            if lower_index == upper_index:
-                continue
-            pair = (min(lower_index, upper_index), max(lower_index, upper_index))
-            segments_by_pair[pair].append(
-                ((float(grid_pH[i]), float(grid_Eh[j])), (float(grid_pH[i + 1]), float(grid_Eh[j])))
-            )
-
     lines: list[tuple[int, int, np.ndarray, np.ndarray]] = []
-    for (left, right), segments in segments_by_pair.items():
-        for (pH_a, eh_a), (pH_b, eh_b) in segments:
-            lines.append((left, right, np.array([pH_a, pH_b]), np.array([eh_a, eh_b])))
+    for idx_a, idx_b in sorted(_adjacent_species_pairs(grid_dominant)):
+        name_a = track_species[idx_a]
+        name_b = track_species[idx_b]
+        for boundary in analytic_boundaries:
+            if boundary.kind == "water":
+                continue
+            for pH_seg, eh_seg in _clip_curve_to_dominant_pair(
+                boundary.pH,
+                boundary.Eh,
+                idx_a,
+                idx_b,
+                name_a,
+                name_b,
+                boundary,
+                graph,
+                totals,
+                track_species,
+                pH_min=pH_min,
+                pH_max=pH_max,
+                eh_min=eh_min,
+                eh_max=eh_max,
+                background_ions=background_ions,
+            ):
+                if len(pH_seg) >= 2:
+                    lines.append((idx_a, idx_b, pH_seg, eh_seg))
+    return lines
+
+
+def _contour_boundary_lines_for_pair(
+    grid_pH: np.ndarray,
+    grid_Eh: np.ndarray,
+    speciation: np.ndarray,
+    grid_dominant: np.ndarray,
+    track_species: Sequence[str],
+    left: int,
+    right: int,
+    graph: PourbaixGraph,
+    totals: dict[str, float],
+    *,
+    pH_min: float,
+    pH_max: float,
+    eh_min: float,
+    eh_max: float,
+    background_ions: Optional[dict[str, float]] = None,
+) -> list[tuple[int, int, np.ndarray, np.ndarray]]:
+    pH_mesh, eh_mesh = np.meshgrid(grid_pH, grid_Eh, indexing="ij")
+    diff = speciation[:, :, left] - speciation[:, :, right]
+    lines: list[tuple[int, int, np.ndarray, np.ndarray]] = []
+    try:
+        import matplotlib.pyplot as plt
+
+        fig = plt.figure()
+        try:
+            cs = plt.contour(pH_mesh, eh_mesh, diff, levels=[0.0])
+            for collection in cs.collections:
+                for path in collection.get_paths():
+                    vertices = path.vertices
+                    if len(vertices) < 2:
+                        continue
+                    active = np.array(
+                        [
+                            _on_dominant_interface(
+                                float(vertices[k, 0]),
+                                float(vertices[k, 1]),
+                                left,
+                                right,
+                                graph,
+                                totals,
+                                track_species,
+                                background_ions=background_ions,
+                            )
+                            for k in range(len(vertices))
+                        ],
+                        dtype=bool,
+                    )
+                    for pH_seg, eh_seg in _split_active_segments(vertices[:, 0], vertices[:, 1], active):
+                        if len(pH_seg) >= 2:
+                            lines.append((left, right, pH_seg, eh_seg))
+        finally:
+            plt.close(fig)
+    except Exception:
+        return []
     return lines
 
 
@@ -166,34 +324,57 @@ def _equal_concentration_boundaries(
     grid_Eh: np.ndarray,
     speciation: np.ndarray,
     grid_dominant: np.ndarray,
+    track_species: Sequence[str],
+    *,
+    analytic_boundaries: Optional[Sequence[PourbaixBoundary]] = None,
+    graph: Optional[PourbaixGraph] = None,
+    totals: Optional[dict[str, float]] = None,
+    pH_min: float = 0.0,
+    pH_max: float = 14.0,
+    eh_min: float = -1.5,
+    eh_max: float = 1.5,
+    background_ions: Optional[dict[str, float]] = None,
 ) -> list[tuple[int, int, np.ndarray, np.ndarray]]:
-    """Prefer region interfaces; fall back to speciation contours when available."""
-    region_lines = _dominant_region_boundaries(grid_pH, grid_Eh, grid_dominant)
-    if region_lines:
-        return region_lines
+    """Analytic point-to-point lines between dominant neighbors only."""
+    if analytic_boundaries and graph is not None and totals is not None:
+        lines = _dominant_analytic_boundary_lines(
+            grid_dominant,
+            track_species,
+            analytic_boundaries,
+            graph,
+            totals,
+            pH_min=pH_min,
+            pH_max=pH_max,
+            eh_min=eh_min,
+            eh_max=eh_max,
+            background_ions=background_ions,
+        )
+        if lines:
+            return lines
 
-    pH_mesh, eh_mesh = np.meshgrid(grid_pH, grid_Eh, indexing="ij")
+    if graph is None or totals is None:
+        return []
+
     lines: list[tuple[int, int, np.ndarray, np.ndarray]] = []
     for left, right in sorted(_adjacent_species_pairs(grid_dominant)):
-        diff = speciation[:, :, left] - speciation[:, :, right]
-        try:
-            import matplotlib.pyplot as plt
-
-            fig = plt.figure()
-            try:
-                cs = plt.contour(pH_mesh, eh_mesh, diff, levels=[0.0])
-                for collection in cs.collections:
-                    for path in collection.get_paths():
-                        vertices = path.vertices
-                        if len(vertices) >= 2:
-                            lines.append((left, right, vertices[:, 0], vertices[:, 1]))
-            finally:
-                plt.close(fig)
-        except Exception:
-            continue
-    return lines
-
-
+        lines.extend(
+            _contour_boundary_lines_for_pair(
+                grid_pH,
+                grid_Eh,
+                speciation,
+                grid_dominant,
+                track_species,
+                left,
+                right,
+                graph,
+                totals,
+                pH_min=pH_min,
+                pH_max=pH_max,
+                eh_min=eh_min,
+                eh_max=eh_max,
+                background_ions=background_ions,
+            )
+        )
     return lines
 
 
@@ -583,9 +764,10 @@ class Pourbaix:
 
     Boundary drawing
     ----------------
-    ``plot(boundary_mode="dominant")`` (default) draws lines only between species that share
-    an edge on the predominance grid — matching hand-drawn Pourbaix diagrams. Junction markers
-    use triple points of those regions only.
+    ``plot(boundary_mode="dominant")`` (default) draws smooth analytic equilibrium curves
+    only where two species share a border on the predominance diagram — not every place
+    those species are equal in concentration. Junction markers use triple points of those
+    regions only.
 
     ``plot(boundary_mode="all")`` draws every inferred analytic boundary and all line
     intersections (previous behaviour).
@@ -727,14 +909,6 @@ class Pourbaix:
         analytic_boundaries: list[PourbaixBoundary] = []
         analytic_junction_points: list[PourbaixJunction] = []
         geometry_source: Literal["analytic", "grid"] = "grid"
-        equal_lines = _equal_concentration_boundaries(pH_values, eh_values, speciation, dominant)
-        dominant_junctions = _dominant_junction_points(
-            pH_values,
-            eh_values,
-            dominant,
-            track_species,
-            junction_labels=self.junction_labels,
-        )
 
         if self.speciation_method == "model":
             analytic_boundaries, analytic_junction_points = compute_analytic_geometry(
@@ -747,6 +921,29 @@ class Pourbaix:
                 junction_labels=self.junction_labels,
             )
             geometry_source = "analytic"
+
+        equal_lines = _equal_concentration_boundaries(
+            pH_values,
+            eh_values,
+            speciation,
+            dominant,
+            track_species,
+            analytic_boundaries=analytic_boundaries or None,
+            graph=graph,
+            totals=totals,
+            pH_min=self.pH_min,
+            pH_max=self.pH_max,
+            eh_min=self.Eh_min,
+            eh_max=self.Eh_max,
+            background_ions=self.background_ions,
+        )
+        dominant_junctions = _dominant_junction_points(
+            pH_values,
+            eh_values,
+            dominant,
+            track_species,
+            junction_labels=self.junction_labels,
+        )
 
         return PourbaixResult(
             grid_pH=pH_values,
