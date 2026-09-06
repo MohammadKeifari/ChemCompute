@@ -2,7 +2,7 @@ import math
 
 import pytest
 import numpy as np
-from src.ChemCompute import Compound,Reaction,Enviroment
+from src.ChemCompute import Compound, Enviroment, HalfReaction, Reaction, SpectrumSpec, XS
 
 
 # -------------------------
@@ -172,6 +172,52 @@ def test_from_string_explicit_rate_order_overrides_stoichiometry():
     reaction = Reaction.from_string("2_A_1 & B > C", [1, 1, 0])
     assert reaction.reactants[0]["stoichiometric_coefficient"] == 2
     assert reaction.reactants[0]["rate_dependency"] == 1
+
+
+def test_from_string_token_keeps_live_compound_and_spectrum():
+    spec = SpectrumSpec(points=[(500e-9, 1000.0)], extrapolate="flat")
+    water = Compound(
+        "H2O",
+        phase_point_list=[{"phase": "l", "temperature": 298}],
+        spectrum=spec,
+    )
+    rxn = Reaction.from_string(
+        f"{water.token} > H+ & OH-",
+        concentrations={"H2O": XS(55.5), "H+": 1e-7, "OH-": 1e-7},
+        K=1e-14,
+    )
+    assert rxn.reactants[0]["compound"] is water
+    assert rxn.reactants[0]["compound"].spectrum is spec
+    assert str(water) == water.unicode_formula
+    assert "@c" not in str(water)
+
+
+def test_from_string_token_mixes_with_formula_text_and_stoich():
+    water = Compound("H2O", phase_point_list=[{"phase": "l", "temperature": 298}])
+    rxn = Reaction.from_string(f"2_{water.token}_0 & CO2 > H2CO3", K=1.7e-3)
+    assert rxn.reactants[0]["compound"] is water
+    assert rxn.reactants[0]["stoichiometric_coefficient"] == 2
+    assert rxn.reactants[0]["rate_dependency"] == 0
+    assert rxn.reactants[1]["compound"].formula == "CO2"
+    assert rxn.reactants[1]["compound"] is not water
+
+
+def test_from_string_unknown_compound_token_raises():
+    with pytest.raises(ValueError, match="Unknown compound token"):
+        Reaction.from_string("@c999999999999 > H+", K=1.0)
+
+
+def test_from_string_token_phase_suffix_raises():
+    water = Compound("H2O", phase_point_list=[{"phase": "l", "temperature": 298}])
+    with pytest.raises(ValueError, match="Phase suffix"):
+        Reaction.from_string(f"{water.token}.l > H+ & OH-", K=1e-14)
+
+
+def test_half_reaction_from_string_keeps_live_compound():
+    fe2 = Compound("Fe+2", phase_point_list=[{"phase": "aq", "temperature": 298}], charge=2)
+    hr = HalfReaction.from_string(f"Fe+3 & @e = {fe2.token}", E0=0.77)
+    assert hr.reduced[0]["compound"] is fe2
+    assert hr.oxidized[0]["compound"].formula == "Fe+3"
 
 
 def test_omitted_rate_dependency_defaults_to_stoichiometry():

@@ -92,6 +92,7 @@ class Compound:
         mp (float | None): Melting point of the compound (°C or K, depending on convention).
         bp (float | None): Boiling point of the compound.
         spectrum: Optional UV-Vis molar absorptivity spec (:class:`SpectrumSpec`).
+        token (str): ``@c{id}`` slot for interpolating this object into ``from_string``.
     """
 
     def __init__(self , formula  , phase_point_list=None , mp=None, bp=None ,scription=True, charge=0, spectrum=None):
@@ -175,6 +176,13 @@ class Compound:
     def set_spectrum(self, spectrum_spec):
         """Attach a UV-Vis molar absorptivity specification to this compound."""
         self.spectrum = spectrum_spec
+
+    @property
+    def token(self) -> str:
+        """Register this compound and return an ``@c{id}`` slot for ``from_string``."""
+        from ._interpolation import register_compound
+
+        return register_compound(self)
 
     def phase(self , temperature):
         """
@@ -407,24 +415,26 @@ class Reaction:
             - Suffix ``_n`` = rate order (defaults to the stoichiometric coefficient)
             - Phases: ``.s``, ``.l``, ``.g``, ``.aq``
             - Ionic charge inferred from trailing ``+`` / ``-`` in species names
+            - Live objects: ``f"{water.token} > H+ & OH-"`` (see :attr:`Compound.token`)
 
         Example:
             "Fe(CN)6-3 & Ce+2 > Fe(CN)6-4 & Ce+3"
         """
-        from ._formula import compound_from_species_token
+        from ._interpolation import compound_from_parsed_name
 
         reformed_reaction = reaction_str.replace(" ","").split(">")
         splited_to_component_reaction = [component.split("&") for component in reformed_reaction] 
         inputed_reactants = []
         inputed_products = []
         component_counter = 0
+        _species = r"(?:@c\d+|[A-Za-z0-9+.\-()]+)"
         for component in splited_to_component_reaction:
             counter = 0
             acceptable_pattern_for_section = re.compile(
-                r'^(\d+(?:\.\d+)?_[A-Za-z0-9+.\-()]+_-?\d+(?:\.\d+)?|' 
-                r'\d+(?:\.\d+)?_[A-Za-z0-9+.\-()]+|' 
-                r'[A-Za-z0-9+.\-()]+_-?\d+(?:\.\d+)?|' 
-                r'[A-Za-z0-9+.\-()]+)(\.s|\.g|\.l)?$'
+                rf"^(\d+(?:\.\d+)?_{_species}_-?\d+(?:\.\d+)?|"
+                rf"\d+(?:\.\d+)?_{_species}|"
+                rf"{_species}_-?\d+(?:\.\d+)?|"
+                rf"{_species})(\.s|\.g|\.l)?$"
             )
             for section in component:
 
@@ -468,18 +478,14 @@ class Reaction:
                     inputed_products.append(compound_info)
             component_counter +=1    
         for index, section in enumerate(inputed_reactants):
-            reactant = section["compound"]
-            if isinstance(reactant, str):
-                from ._half_reaction import _reject_electron_formula
-                _reject_electron_formula(reactant)
-            inputed_reactants[index]["compound"] = compound_from_species_token(reactant, T=T)
+            inputed_reactants[index]["compound"] = compound_from_parsed_name(
+                section["compound"], T=T
+            )
 
         for index, section in enumerate(inputed_products):
-            product = section["compound"]
-            if isinstance(product, str):
-                from ._half_reaction import _reject_electron_formula
-                _reject_electron_formula(product)
-            inputed_products[index]["compound"] = compound_from_species_token(product, T=T)
+            inputed_products[index]["compound"] = compound_from_parsed_name(
+                section["compound"], T=T
+            )
         if concentrations is None:
             concentrations = {}
         elif isinstance(concentrations, (list, tuple)):

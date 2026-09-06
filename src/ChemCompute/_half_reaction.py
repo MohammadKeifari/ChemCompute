@@ -102,12 +102,13 @@ def _tokenize_half_side(side: str) -> list[str]:
     side = side.replace(" ", "")
     side = re.sub(r"\+(?=@e)", "", side)
     electron = r"(?:\d+(?:\.\d+)?_)?@e"
+    live = r"(?:\d+(?:\.\d+)?_)?@c\d+(?:_-?\d+(?:\.\d+)?)?"
     ion_suffix = r"(?:[+-]\d*|\+\d*|-\d*)?"
     term = (
         rf"\d+(?:\.\d+)?_[A-Za-z0-9.\-()\[\]]+{ion_suffix}(?:\.(?:s|l|g|aq))?"
         rf"|[A-Za-z0-9.\-()\[\]]+{ion_suffix}(?:\.(?:s|l|g|aq))?"
     )
-    pattern = rf"(?:{electron}|{term})"
+    pattern = rf"(?:{electron}|{live}|{term})"
     tokens = re.findall(pattern, side)
     if not tokens:
         raise ValueError(f"Could not parse half-reaction side: {side!r}")
@@ -141,18 +142,22 @@ def _parse_side_tokens(side: str) -> tuple[list[dict], float]:
                 "Use @e as the electron token in half-reaction strings, not bare e or e-."
             )
         if "@" in section:
-            raise ValueError(f"Invalid electron token {section!r}; use @e or n_@e.")
+            from ._interpolation import is_live_compound_section
+
+            if not is_live_compound_section(section):
+                raise ValueError(f"Invalid electron token {section!r}; use @e or n_@e.")
 
         species.append(_parse_section(section))
     return species, n_electrons
 
 
 def _parse_section(section: str) -> dict:
+    _species = r"(?:@c\d+|[A-Za-z0-9+.\-()\[\]]+)"
     acceptable = re.compile(
-        r"^(\d+(?:\.\d+)?_[A-Za-z0-9+.\-()\[\]]+_-?\d+(?:\.\d+)?|"
-        r"\d+(?:\.\d+)?_[A-Za-z0-9+.\-()\[\]]+|"
-        r"[A-Za-z0-9+.\-()\[\]]+_-?\d+(?:\.\d+)?|"
-        r"[A-Za-z0-9+.\-()\[\]]+)(\.s|\.g|\.l|\.aq)?$"
+        rf"^(\d+(?:\.\d+)?_{_species}_-?\d+(?:\.\d+)?|"
+        rf"\d+(?:\.\d+)?_{_species}|"
+        rf"{_species}_-?\d+(?:\.\d+)?|"
+        rf"{_species})(\.s|\.g|\.l|\.aq)?$"
     )
     if not acceptable.match(section):
         raise ValueError(f"Invalid half-reaction term: {section!r}")
@@ -199,14 +204,14 @@ def _parse_section(section: str) -> dict:
 
 
 def _assign_compounds(species_list: list[dict], T: float) -> None:
-    from ._formula import compound_from_species_token
     from ._general import Compound
+    from ._interpolation import compound_from_parsed_name
 
     for entry in species_list:
         name = entry["compound"]
         if isinstance(name, Compound):
             continue
-        entry["compound"] = compound_from_species_token(name, T=T)
+        entry["compound"] = compound_from_parsed_name(name, T=T)
 
 
 @dataclass

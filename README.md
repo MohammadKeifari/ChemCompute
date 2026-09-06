@@ -82,6 +82,7 @@ Use `Reaction.from_string(...)` and `HalfReaction.from_string(...)` with a singl
 | Rate order (Reaction) | suffix `_n` | `A_2` (optional; default = stoichiometry) |
 | Phase | suffix | `.aq`, `.s`, `.l`, `.g` |
 | Electrons | `@e` only | never bare `e-` in Reaction |
+| Live compound | `{water.token}` | keeps spectrum, phase, mp/bp |
 
 Ionic charge is inferred from trailing `+` / `-` in species names (`H+`, `SeO4-2`, `Fe(CN)6-4`, `[Fe(CN)6]-4`). When compounds are added to an `Enviroment`, non-zero charges are copied into `env.charge_map` automatically (explicit `charge_map` entries still win at activity time).
 
@@ -103,6 +104,17 @@ hr = HalfReaction.from_string(
 )
 env = Enviroment(kw, ka, hr, concentrations={"HSeO4-": 1.0}, buffer=["H+"])
 env.set_excess({"H2O": XS()})  # optional env-level excess override
+```
+
+To keep a Compound you already built (library entry with spectrum, mp, bp), interpolate `.token` — not `f"{water}"`, which still prints the formula:
+
+```python
+kw = Reaction.from_string(
+    f"{water.token} > H+ & OH-",
+    concentrations={"H2O": XS(55.5)},
+    K=1e-14,
+)
+assert kw.reactants[0]["compound"] is water
 ```
 
 **Migration:** replace `+` between species with `&` (e.g. `A + B > C` → `A & B > C`; `Fe+3 + @e = Fe+2` → `Fe+3 & @e = Fe+2`).
