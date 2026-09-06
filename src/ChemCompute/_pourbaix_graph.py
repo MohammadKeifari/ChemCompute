@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 import warnings
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Sequence
 
@@ -31,11 +32,20 @@ def _primary_side_species(entries, *, skip: frozenset[str]) -> str:
 
 
 def _build_species_chain(start: str, pka_pairs: Sequence[tuple[str, str, float]]) -> list[str]:
-    chain = [start]
+    """Return the acid→base path that contains ``start`` (most acidic first)."""
+    acid_to_base = {acid: base for acid, base, _ in pka_pairs}
+    base_to_acid = {base: acid for acid, base, _ in pka_pairs}
     current = start
-    pair_map = {acid: base for acid, base, _ in pka_pairs}
-    while current in pair_map:
-        nxt = pair_map[current]
+    seen = {current}
+    while current in base_to_acid:
+        acid = base_to_acid[current]
+        if acid in seen:
+            break
+        current = acid
+        seen.add(current)
+    chain = [current]
+    while current in acid_to_base:
+        nxt = acid_to_base[current]
         if nxt in chain:
             break
         chain.append(nxt)
@@ -91,7 +101,11 @@ def _chain_concentrations(
     pair_map = {(acid, base): pka for acid, base, pka in pka_pairs}
     weights = [1.0]
     for index in range(len(species) - 1):
-        pka = pair_map[(species[index], species[index + 1])]
+        key = (species[index], species[index + 1])
+        pka = pair_map.get(key)
+        if pka is None:
+            weights.append(weights[-1])
+            continue
         weights.append(weights[-1] * (10 ** (-pka) / max(h, 1e-300)))
     norm = sum(weights)
     return {species[index]: total * weights[index] / norm for index in range(len(species))}
@@ -117,7 +131,7 @@ def _build_segments_reduced(hr, species_chain, pka_pairs):
         base = species_chain[index + 1]
         pka = pair_map.get((acid, base))
         if pka is None:
-            raise ValueError(f"Missing pKa pair for {acid} -> {base}.")
+            continue
         e_at = e0 - NERNST_K * m / n * pka
         segments.append((pka, e0, m, n))
         m = max(m - 1.0, 0.0)
@@ -137,7 +151,7 @@ def _build_segments(hr, species_chain, pka_pairs):
         base = species_chain[index + 1]
         pka = pair_map.get((acid, base))
         if pka is None:
-            raise ValueError(f"Missing pKa pair for {acid} -> {base}.")
+            continue
         e_at = e0 - NERNST_K * m / n * pka
         segments.append((pka, e0, m, n))
         m += 1.0
@@ -159,6 +173,35 @@ def _redox_element(formula: str) -> str:
         if symbol not in _SKIP_ELEMENTS:
             return symbol
     raise ValueError(f"Could not identify redox element in formula {formula!r}.")
+
+
+def _count_element(formula: str, element: str) -> int:
+    """Count atoms of ``element`` in a species formula (charge/phase stripped)."""
+    core = formula.split(".")[0]
+    core = re.sub(r"[+-]\d*$", "", core)
+    total = 0
+    for match in _ELEMENT_RE.finditer(core):
+        if match.group(0) != element:
+            continue
+        digits = re.match(r"\d+", core[match.end() :])
+        total += int(digits.group(0)) if digits else 1
+    return total
+
+
+def _primary_with_coeff(entries) -> tuple[str, float]:
+    for entry in entries:
+        formula = _formula(entry)
+        if formula not in POURBAIX_SKIP_SPECIES:
+            return formula, float(entry.get("stoichiometric_coefficient", 1.0))
+    raise ValueError("Could not identify a primary species for Pourbaix inference.")
+
+
+def _edge_atom_balanced(hr, element: str) -> bool:
+    ox, c_ox = _primary_with_coeff(hr.oxidized)
+    red, c_red = _primary_with_coeff(hr.reduced)
+    n_ox = _count_element(ox, element) * c_ox
+    n_red = _count_element(red, element) * c_red
+    return n_ox > 0 and abs(n_ox - n_red) < 1e-9
 
 
 def format_junction_label(species: Sequence[str]) -> str:
@@ -207,6 +250,7 @@ class ElementChain:
     precipitation_edges: list[PrecipitationEdge] = field(default_factory=list)
     association_edges: list[AssociationEdge] = field(default_factory=list)
     hydration_edges: list[HydrationEdge] = field(default_factory=list)
+    redox_edges: list[tuple[int, int]] = field(default_factory=list)
 
 
 @dataclass
@@ -312,8 +356,9 @@ def classify_reaction(rxn, index: int, *, redox_indices: set[int]) -> Optional[o
 
     solids_r = [e for e in reactants if _is_solid(e)]
     solids_p = [e for e in products if _is_solid(e)]
-    aq_r = [e for e in reactants if not _is_solid(e) and _formula(e) not in POURBAIX_SKIP_SPECIES]
-    aq_p = [e for e in products if not _is_solid(e) and _formula(e) not in POURBAIX_SKIP_SPECIES]
+    skip_ksp = frozenset({"H2O"})
+    aq_r = [e for e in reactants if not _is_solid(e) and _formula(e) not in skip_ksp]
+    aq_p = [e for e in products if not _is_solid(e) and _formula(e) not in skip_ksp]
 
     # Ksp: Solid ⇌ ions
     if len(solids_r) == 1 and not solids_p and aq_p:
@@ -368,6 +413,156 @@ def _classify_all_reactions(env) -> tuple[list[AcidBaseEdge], list[Precipitation
     return acid_base, precipitation, association, hydration
 
 
+def _merge_species_groups(groups: list[list[str]]) -> list[list[str]]:
+    """Union groups that share any species, preserving first-seen order inside each group."""
+    merged: list[list[str]] = []
+    for group in groups:
+        group_set = set(group)
+        hits = [index for index, existing in enumerate(merged) if group_set & set(existing)]
+        if not hits:
+            merged.append(list(group))
+            continue
+        anchor = hits[0]
+        for index in reversed(hits[1:]):
+            for name in merged[index]:
+                if name not in merged[anchor]:
+                    merged[anchor].append(name)
+            del merged[index]
+        for name in group:
+            if name not in merged[anchor]:
+                merged[anchor].append(name)
+    return merged
+
+
+def _build_oxidation_graph(
+    element: str,
+    hrs: Sequence,
+    pka_pairs: Sequence[tuple[str, str, float]],
+    hydration: Sequence[HydrationEdge],
+) -> tuple[list[list[str]], list, list[tuple[int, int]]]:
+    """Group HR species into oxidation levels and return directed ox→red edges."""
+    groups: list[list[str]] = []
+    for hr in hrs:
+        ox = _primary_side_species(hr.oxidized, skip=POURBAIX_SKIP_SPECIES)
+        red = _primary_side_species(hr.reduced, skip=POURBAIX_SKIP_SPECIES)
+        for name in (ox, red):
+            groups.append(
+                _extend_level_with_hydration(
+                    _build_species_chain(name, pka_pairs),
+                    pka_pairs,
+                    hydration,
+                )
+            )
+    levels = _merge_species_groups(groups)
+
+    def level_of(name: str) -> int:
+        for index, level in enumerate(levels):
+            if name in level:
+                return index
+        raise ValueError(f"Species {name!r} is not in an oxidation level for {element}.")
+
+    raw_edges: list[tuple[int, int, object]] = []
+    seen_edge: set[tuple[int, int, int]] = set()
+    for hr in hrs:
+        ox = _primary_side_species(hr.oxidized, skip=POURBAIX_SKIP_SPECIES)
+        red = _primary_side_species(hr.reduced, skip=POURBAIX_SKIP_SPECIES)
+        ox_i = level_of(ox)
+        red_i = level_of(red)
+        if ox_i == red_i:
+            continue
+        key = (ox_i, red_i, id(hr))
+        if key in seen_edge:
+            continue
+        seen_edge.add(key)
+        raw_edges.append((ox_i, red_i, hr))
+
+    reduced_names = {
+        _primary_side_species(hr.reduced, skip=POURBAIX_SKIP_SPECIES) for hr in hrs
+    }
+    oxidized_names = {
+        _primary_side_species(hr.oxidized, skip=POURBAIX_SKIP_SPECIES) for hr in hrs
+    }
+    roots = [
+        index
+        for index, level in enumerate(levels)
+        if any(name in oxidized_names for name in level)
+        and not any(name in reduced_names for name in level)
+    ]
+    if not roots:
+        roots = [0]
+
+    children: dict[int, list[tuple[float, int]]] = defaultdict(list)
+    for ox_i, red_i, hr in raw_edges:
+        red_name = _primary_side_species(hr.reduced, skip=POURBAIX_SKIP_SPECIES)
+        n_atom = max(_count_element(red_name, element), 1)
+        children[ox_i].append((hr.n_electrons / n_atom, red_i))
+
+    ordered: list[int] = []
+    seen_levels: set[int] = set()
+    queue: deque[int] = deque(sorted(roots))
+    while queue:
+        current = queue.popleft()
+        if current in seen_levels:
+            continue
+        seen_levels.add(current)
+        ordered.append(current)
+        for _, child in sorted(children.get(current, [])):
+            if child not in seen_levels:
+                queue.append(child)
+    for index in range(len(levels)):
+        if index not in seen_levels:
+            ordered.append(index)
+
+    old_to_new = {old: new for new, old in enumerate(ordered)}
+    oxidation_levels = [levels[index] for index in ordered]
+
+    tree_pairs: set[tuple[int, int]] = set()
+    for parent in ordered:
+        for _, child in sorted(children.get(parent, [])):
+            tree_pairs.add((old_to_new[parent], old_to_new[child]))
+
+    bfs_hrs: list = []
+    bfs_edges: list[tuple[int, int]] = []
+    leftover_hrs: list = []
+    leftover_edges: list[tuple[int, int]] = []
+    used_hr: set[int] = set()
+    for ox_i, red_i, hr in raw_edges:
+        pair = (old_to_new[ox_i], old_to_new[red_i])
+        if pair in tree_pairs and id(hr) not in used_hr:
+            bfs_hrs.append(hr)
+            bfs_edges.append(pair)
+            used_hr.add(id(hr))
+            tree_pairs.discard(pair)
+    for ox_i, red_i, hr in raw_edges:
+        if id(hr) in used_hr:
+            continue
+        leftover_hrs.append(hr)
+        leftover_edges.append((old_to_new[ox_i], old_to_new[red_i]))
+
+    return oxidation_levels, bfs_hrs + leftover_hrs, bfs_edges + leftover_edges
+
+
+def _extend_level_with_hydration(
+    level: list[str],
+    pka_pairs: Sequence[tuple[str, str, float]],
+    hydration_edges: Sequence[HydrationEdge],
+) -> list[str]:
+    """Append hydrated forms and their acid-base chains to an oxidation level."""
+    extended = list(level)
+    changed = True
+    while changed:
+        changed = False
+        for edge in hydration_edges:
+            if edge.dehydrated not in extended or edge.hydrated in extended:
+                continue
+            extended.append(edge.hydrated)
+            for name in _build_species_chain(edge.hydrated, pka_pairs)[1:]:
+                if name not in extended:
+                    extended.append(name)
+            changed = True
+    return extended
+
+
 def build_pourbaix_graph(env) -> PourbaixGraph:
     """Build per-element redox chains and classified reaction edges from an environment."""
     half_reactions = sorted(
@@ -399,18 +594,12 @@ def build_pourbaix_graph(env) -> PourbaixGraph:
     seen_track: set[str] = set()
 
     for element in sorted(hr_by_element):
-        element_hrs = sorted(hr_by_element[element], key=lambda hr: hr.E0_SHE, reverse=True)
-        oxidation_levels: list[list[str]] = []
-
-        first_ox = _primary_side_species(element_hrs[0].oxidized, skip=POURBAIX_SKIP_SPECIES)
-        oxidation_levels.append(_build_species_chain(first_ox, pka_pairs))
-
-        for index in range(len(element_hrs) - 1):
-            bridge = _primary_side_species(element_hrs[index].reduced, skip=POURBAIX_SKIP_SPECIES)
-            oxidation_levels.append(_build_species_chain(bridge, pka_pairs))
-
-        last_red = _primary_side_species(element_hrs[-1].reduced, skip=POURBAIX_SKIP_SPECIES)
-        oxidation_levels.append(_build_species_chain(last_red, pka_pairs))
+        oxidation_levels, element_hrs, redox_edges = _build_oxidation_graph(
+            element,
+            hr_by_element[element],
+            pka_pairs,
+            hydration,
+        )
 
         level_species = {name for level in oxidation_levels for name in level}
         chain_pka = [(a, b, p) for a, b, p in pka_pairs if a in level_species and b in level_species]
@@ -432,6 +621,12 @@ def build_pourbaix_graph(env) -> PourbaixGraph:
                 if edge.product not in seen_track:
                     seen_track.add(edge.product)
                     all_track.append(edge.product)
+        for edge in precipitation:
+            if edge.solid not in track:
+                track.append(edge.solid)
+                if edge.solid not in seen_track:
+                    seen_track.add(edge.solid)
+                    all_track.append(edge.solid)
 
         chains.append(
             ElementChain(
@@ -444,6 +639,7 @@ def build_pourbaix_graph(env) -> PourbaixGraph:
                 precipitation_edges=[e for e in precipitation],
                 association_edges=chain_assoc,
                 hydration_edges=chain_hyd,
+                redox_edges=redox_edges,
             )
         )
 
@@ -464,8 +660,49 @@ def _level_index(chain: ElementChain, species: str) -> int:
     raise ValueError(f"Species {species!r} not found in chain for {chain.element}.")
 
 
-def _prevalent_form(pH: float, level: Sequence[str], pka_pairs: Sequence[tuple[str, str, float]]) -> str:
-    return _acid_base_form(pH, level, pka_pairs)
+def _iter_redox_edges(chain: ElementChain) -> list[tuple[tuple[int, int], object]]:
+    if chain.redox_edges and len(chain.redox_edges) == len(chain.half_reactions):
+        return list(zip(chain.redox_edges, chain.half_reactions))
+    return [((index, index + 1), hr) for index, hr in enumerate(chain.half_reactions)]
+
+
+def _hr_connecting(chain: ElementChain, src: int, dst: int):
+    for (ox_i, red_i), hr in _iter_redox_edges(chain):
+        if ox_i == src and red_i == dst:
+            return hr
+    return None
+
+
+def _best_path(chain: ElementChain, src: int, dst: int) -> list[tuple[int, int, object]]:
+    """Shortest ox→red path, preferring atom-balanced half-reactions."""
+    if src == dst:
+        return []
+    outgoing: dict[int, list[tuple[int, object]]] = defaultdict(list)
+    for (ox_i, red_i), hr in _iter_redox_edges(chain):
+        outgoing[ox_i].append((red_i, hr))
+
+    best: dict[int, tuple[tuple[int, int, int], list[tuple[int, int, object]]]] = {
+        src: ((0, 0, 0), [])
+    }
+    queue: deque[int] = deque([src])
+    while queue:
+        current = queue.popleft()
+        cost, path = best[current]
+        for nxt, hr in outgoing.get(current, []):
+            unbalanced = 0 if _edge_atom_balanced(hr, chain.element) else 1
+            new_path = path + [(current, nxt, hr)]
+            new_cost = (cost[0] + unbalanced, cost[1] + 1, cost[2] + int(hr.n_electrons))
+            prev = best.get(nxt)
+            if prev is None or new_cost < prev[0]:
+                best[nxt] = (new_cost, new_path)
+                queue.append(nxt)
+    found = best.get(dst)
+    return found[1] if found is not None else []
+
+
+def _prevalent_form(pH: float, level: Sequence[str], chain: ElementChain) -> str:
+    dist = _within_level_distribution(pH, level, 1.0, chain)
+    return max(level, key=lambda name: dist.get(name, 0.0))
 
 
 def _hr_nominal_species(hr) -> tuple[str, str]:
@@ -482,34 +719,21 @@ def _nominal_boundary_e(pH: float, hr, ox_chain: Sequence[str], red_chain: Seque
     return _boundary_e(segments, pH)
 
 
-def boundary_Eh(
+def _couple_Eh(
     pH: float,
     species_high: str,
     species_low: str,
     chain: ElementChain,
+    hr,
 ) -> float:
-    """
-    Eh (V vs SHE) where ``species_high`` and ``species_low`` have equal concentration at ``pH``.
-    """
-    pH = float(pH)
-    level_high = _level_index(chain, species_high)
-    level_low = _level_index(chain, species_low)
-    if level_high >= level_low:
-        raise ValueError("species_high must be more oxidized than species_low.")
-
-    if level_low - level_high != 1:
-        mid = _prevalent_form(pH, chain.oxidation_levels[level_high + 1], chain.pka_pairs)
-        return boundary_Eh(pH, species_high, mid, chain)
-
-    hr = chain.half_reactions[level_high]
-    ox_chain = chain.oxidation_levels[level_high]
-    red_chain = chain.oxidation_levels[level_low]
+    ox_chain = chain.oxidation_levels[_level_index(chain, species_high)]
+    red_chain = chain.oxidation_levels[_level_index(chain, species_low)]
     nom_ox, nom_red = _hr_nominal_species(hr)
     n = hr.n_electrons
     m = hr.net_h_plus_stoichiometry()
 
-    conc_ox = _chain_concentrations(pH, ox_chain, chain.pka_pairs, 1.0)
-    conc_red = _chain_concentrations(pH, red_chain, chain.pka_pairs, 1.0)
+    conc_ox = _within_level_distribution(pH, ox_chain, 1.0, chain)
+    conc_red = _within_level_distribution(pH, red_chain, 1.0, chain)
     ox_high = max(conc_ox.get(species_high, 1e-300), 1e-300)
     ox_nom = max(conc_ox.get(nom_ox, 1e-300), 1e-300)
     red_low = max(conc_red.get(species_low, 1e-300), 1e-300)
@@ -517,6 +741,183 @@ def boundary_Eh(
 
     ratio = (red_nom / red_low) / (ox_nom / ox_high)
     return hr.E0_SHE - (NERNST_K / n) * math.log10(max(ratio, 1e-300)) - (NERNST_K * m / n) * pH
+
+
+def boundary_Eh(
+    pH: float,
+    species_high: str,
+    species_low: str,
+    chain: ElementChain,
+) -> float:
+    """
+    Eh (V vs SHE) where ``species_high`` and ``species_low`` have equal formation energy at ``pH``.
+    """
+    pH = float(pH)
+    level_high = _level_index(chain, species_high)
+    level_low = _level_index(chain, species_low)
+    if level_high == level_low:
+        raise ValueError("species_high and species_low must be different oxidation levels.")
+    if level_high > level_low:
+        raise ValueError("species_high must be more oxidized than species_low.")
+
+    path = _best_path(chain, level_high, level_low)
+    direct = _hr_connecting(chain, level_high, level_low)
+    if direct is not None:
+        path = [(level_high, level_low, direct)]
+    if not path:
+        raise ValueError(
+            f"No redox path from {species_high!r} to {species_low!r} in chain {chain.element}."
+        )
+    if len(path) == 1:
+        return _couple_Eh(pH, species_high, species_low, chain, path[0][2])
+
+    n_sum = 0.0
+    nE_sum = 0.0
+    for src, dst, hr in path:
+        left = species_high if src == level_high else _prevalent_form(pH, chain.oxidation_levels[src], chain)
+        right = species_low if dst == level_low else _prevalent_form(pH, chain.oxidation_levels[dst], chain)
+        eh = _couple_Eh(pH, left, right, chain, hr)
+        n_sum += hr.n_electrons
+        nE_sum += hr.n_electrons * eh
+    return nE_sum / n_sum
+
+
+def _level_formation(chain: ElementChain, pH: float) -> tuple[list[str], list[float], list[float]]:
+    """Prevalent forms plus (n_e per redox atom, E vs most-oxidized level) for each level."""
+    forms = [_prevalent_form(pH, level, chain) for level in chain.oxidation_levels]
+    n_levels = len(chain.oxidation_levels)
+    n_e = [0.0] * n_levels
+    e_vs_ref = [0.0] * n_levels
+    ref = 0
+    for index in range(1, n_levels):
+        path = _best_path(chain, ref, index)
+        direct = _hr_connecting(chain, ref, index)
+        if direct is not None:
+            path = [(ref, index, direct)]
+        if not path:
+            n_e[index] = float("inf")
+            continue
+        n_sum = 0.0
+        nE_sum = 0.0
+        for src, dst, hr in path:
+            eh = _couple_Eh(pH, forms[src], forms[dst], chain, hr)
+            n_sum += hr.n_electrons
+            nE_sum += hr.n_electrons * eh
+        n_atom = max(_count_element(chain.oxidation_levels[index][0], chain.element), 1)
+        n_e[index] = n_sum / n_atom
+        e_vs_ref[index] = nE_sum / n_sum
+    return forms, n_e, e_vs_ref
+
+
+def _select_hull_band(Eh: float, n_e: Sequence[float], e_vs_ref: Sequence[float]) -> int:
+    """Pick the oxidation level with lowest formation energy per redox atom."""
+    best = 0
+    best_key = (0.0, 0.0, 0)
+    for index, (n, e_ref) in enumerate(zip(n_e, e_vs_ref)):
+        if n == float("inf"):
+            continue
+        energy = n * (Eh - e_ref)
+        key = (energy, n, index)
+        if index == 0 or key < best_key:
+            best_key = key
+            best = index
+    return best
+
+
+def _upper_hull_indices(n_e: Sequence[float], e_vs_ref: Sequence[float]) -> list[int]:
+    """Level indices on the upper Frost hull of ``(n, n*E)``."""
+    points: list[tuple[float, float, int]] = []
+    for index, (n, e_ref) in enumerate(zip(n_e, e_vs_ref)):
+        if n == float("inf"):
+            continue
+        points.append((n, n * e_ref, index))
+    points.sort()
+    merged: list[tuple[float, float, int]] = []
+    for n, nE, index in points:
+        if merged and abs(merged[-1][0] - n) < 1e-12:
+            if nE > merged[-1][1] or (abs(nE - merged[-1][1]) < 1e-15 and index < merged[-1][2]):
+                merged[-1] = (n, nE, index)
+            continue
+        merged.append((n, nE, index))
+
+    def cross(
+        origin: tuple[float, float, int],
+        a: tuple[float, float, int],
+        b: tuple[float, float, int],
+    ) -> float:
+        return (a[0] - origin[0]) * (b[1] - origin[1]) - (a[1] - origin[1]) * (b[0] - origin[0])
+
+    hull: list[tuple[float, float, int]] = []
+    for point in merged:
+        while len(hull) >= 2 and cross(hull[-2], hull[-1], point) > 0:
+            hull.pop()
+        hull.append(point)
+    return [index for _, _, index in hull]
+
+
+def _hull_pair_eh(n_e: Sequence[float], e_vs_ref: Sequence[float], left: int, right: int) -> float:
+    return (n_e[right] * e_vs_ref[right] - n_e[left] * e_vs_ref[left]) / (n_e[right] - n_e[left])
+
+
+def _stable_hull_indices(
+    n_e: Sequence[float],
+    e_vs_ref: Sequence[float],
+    *,
+    min_width: float = 0.01,
+) -> list[int]:
+    """Upper hull with interior vertices removed when their Eh window is thinner than ``min_width``."""
+    hull = _upper_hull_indices(n_e, e_vs_ref)
+    while len(hull) > 2:
+        bounds = [
+            _hull_pair_eh(n_e, e_vs_ref, hull[index], hull[index + 1])
+            for index in range(len(hull) - 1)
+        ]
+        drop: Optional[int] = None
+        for index in range(1, len(hull) - 1):
+            width = bounds[index - 1] - bounds[index]
+            if width < min_width:
+                drop = index
+                break
+        if drop is None:
+            break
+        del hull[drop]
+    return hull
+
+
+def _within_level_crossovers(
+    level: Sequence[str],
+    chain: ElementChain,
+    *,
+    pH_min: float = 0.0,
+    pH_max: float = 14.0,
+    steps: int = 400,
+) -> list[tuple[str, str, float]]:
+    """pH values where the prevalent species inside ``level`` switches."""
+    if len(level) < 2:
+        return []
+    samples = np.linspace(pH_min, pH_max, max(steps, 2))
+    pairs: list[tuple[str, str, float]] = []
+    prev_name = _prevalent_form(float(samples[0]), level, chain)
+    prev_pH = float(samples[0])
+    for pH in samples[1:]:
+        name = _prevalent_form(float(pH), level, chain)
+        if name == prev_name:
+            prev_pH = float(pH)
+            continue
+        lo, hi = prev_pH, float(pH)
+        lo_name, hi_name = prev_name, name
+        for _ in range(24):
+            mid = 0.5 * (lo + hi)
+            mid_name = _prevalent_form(mid, level, chain)
+            if mid_name == lo_name:
+                lo = mid
+            else:
+                hi = mid
+                hi_name = mid_name
+        pairs.append((lo_name, hi_name, 0.5 * (lo + hi)))
+        prev_name = name
+        prev_pH = float(pH)
+    return pairs
 
 
 def _solve_dimer(total: float, k: float) -> tuple[float, float]:
@@ -573,6 +974,29 @@ def _association_distribution(
     return merged
 
 
+def _ksp_background(pH: float, extra: Optional[dict[str, float]] = None) -> dict[str, float]:
+    background = {
+        "H+": 10.0 ** (-float(pH)),
+        "OH-": 10.0 ** (float(pH) - 14.0),
+    }
+    if extra:
+        background.update(extra)
+    return background
+
+
+def _ksp_quotient(
+    conc: dict[str, float],
+    edge: PrecipitationEdge,
+    background: Optional[dict[str, float]] = None,
+) -> float:
+    background = background or {}
+    q = 1.0
+    for ion, coeff in edge.ions.items():
+        c = conc.get(ion, background.get(ion, 0.0))
+        q *= max(c, 1e-300) ** coeff
+    return q
+
+
 def _check_ksp(
     conc: dict[str, float],
     precipitation_edges: Sequence[PrecipitationEdge],
@@ -580,12 +1004,71 @@ def _check_ksp(
 ) -> Optional[str]:
     background = background or {}
     for edge in precipitation_edges:
-        q = 1.0
-        for ion, coeff in edge.ions.items():
-            c = conc.get(ion, background.get(ion, 0.0))
-            q *= max(c, 1e-300) ** coeff
-        if q >= edge.ksp:
+        if _ksp_quotient(conc, edge, background) >= edge.ksp:
             return edge.solid
+    return None
+
+
+def _ksp_metal_ions(edge: PrecipitationEdge) -> list[str]:
+    return [
+        ion
+        for ion in edge.ions
+        if ion not in POURBAIX_SKIP_SPECIES and ion not in {"OH-", "H+"}
+    ]
+
+
+def _level_containing_ksp_ions(chain: ElementChain, edge: PrecipitationEdge) -> Optional[list[str]]:
+    metals = _ksp_metal_ions(edge)
+    if not metals:
+        return None
+    for level in chain.oxidation_levels:
+        if any(ion in level for ion in metals):
+            return list(level)
+    return None
+
+
+def _solid_from_ksp(
+    pH: float,
+    level: Sequence[str],
+    c_tot: float,
+    chain: ElementChain,
+    precipitation_edges: Sequence[PrecipitationEdge],
+    background: Optional[dict[str, float]] = None,
+) -> Optional[str]:
+    if c_tot <= 0:
+        return None
+    bg = _ksp_background(pH, background)
+    conc = _within_level_distribution(pH, level, c_tot, chain)
+    return _check_ksp(conc, precipitation_edges, bg)
+
+
+def _ksp_crossover_pH(
+    chain: ElementChain,
+    edge: PrecipitationEdge,
+    c_tot: float,
+    *,
+    pH_min: float,
+    pH_max: float,
+    steps: int = 400,
+    background: Optional[dict[str, float]] = None,
+) -> Optional[float]:
+    level = _level_containing_ksp_ions(chain, edge)
+    if level is None or c_tot <= 0:
+        return None
+    samples = np.linspace(pH_min, pH_max, max(int(steps), 2))
+    prev_pH: Optional[float] = None
+    prev_q: Optional[float] = None
+    for pH in samples:
+        pH_value = float(pH)
+        conc = _within_level_distribution(pH_value, level, c_tot, chain)
+        q = _ksp_quotient(conc, edge, _ksp_background(pH_value, background))
+        if prev_q is not None and (prev_q - edge.ksp) * (q - edge.ksp) <= 0.0:
+            if abs(q - prev_q) < 1e-300:
+                return pH_value
+            t = (edge.ksp - prev_q) / (q - prev_q)
+            return float(prev_pH + t * (pH_value - prev_pH))
+        prev_pH = pH_value
+        prev_q = q
     return None
 
 
@@ -595,32 +1078,48 @@ def _within_level_distribution(
     total: float,
     chain: ElementChain,
 ) -> dict[str, float]:
-    conc = _association_distribution(
+    for edge in chain.hydration_edges:
+        if edge.dehydrated in level and edge.hydrated in level:
+            sublevel = [edge.hydrated] + [
+                name for name in level if name not in (edge.dehydrated, edge.hydrated)
+            ]
+            conc = _association_distribution(
+                pH,
+                sublevel,
+                total,
+                chain.pka_pairs,
+                chain.association_edges,
+            )
+            hydrated_amount = conc.get(edge.hydrated, 0.0)
+            conc[edge.dehydrated] = hydrated_amount / max(edge.kh, 1e-300)
+            c_sum = sum(conc.get(name, 0.0) for name in level)
+            if c_sum > 0:
+                scale = total / c_sum
+                for name in level:
+                    conc[name] = conc.get(name, 0.0) * scale
+            return conc
+
+    return _association_distribution(
         pH,
         level,
         total,
         chain.pka_pairs,
         chain.association_edges,
     )
-    for edge in chain.hydration_edges:
-        if edge.dehydrated in level and edge.hydrated in level:
-            cd = conc.get(edge.dehydrated, 0.0)
-            ch = conc.get(edge.hydrated, 0.0)
-            if cd + ch > 0:
-                kh = edge.kh
-                ch_new = kh * cd
-                scale = total / max(cd + ch_new, 1e-300)
-                conc[edge.dehydrated] = cd * scale
-                conc[edge.hydrated] = ch_new * scale
-    return conc
 
 
-def _near_boundary(Eh: float, bounds: Sequence[float], band: int, width: float = 0.015) -> Optional[int]:
-    if band > 0 and -width < Eh - bounds[band - 1] < width:
-        return band - 1
-    if band < len(bounds) and -width < Eh - bounds[band] < width:
-        return band + 1
-    return None
+def _select_oxidation_band(Eh: float, bounds: Sequence[float]) -> int:
+    """Backward-compatible window picker for monotonic adjacent bounds."""
+    n_e = [0.0]
+    e_vs_ref = [0.0]
+    n_sum = 0.0
+    nE_sum = 0.0
+    for bound in bounds:
+        n_sum += 1.0
+        nE_sum += bound
+        n_e.append(n_sum)
+        e_vs_ref.append(nE_sum / n_sum)
+    return _select_hull_band(Eh, n_e, e_vs_ref)
 
 
 def dominant_at(
@@ -633,28 +1132,20 @@ def dominant_at(
     background_ions: Optional[dict[str, float]] = None,
 ) -> dict[str, float]:
     levels = chain.oxidation_levels
-    n = len(levels)
-    forms = [_prevalent_form(pH, level, chain.pka_pairs) for level in levels]
-    bounds = [boundary_Eh(pH, forms[i], forms[i + 1], chain) for i in range(n - 1)]
-
-    band = n - 1
-    for index, bound in enumerate(bounds):
-        if Eh >= bound:
-            band = index
-            break
+    _, n_e, e_vs_ref = _level_formation(chain, pH)
+    hull = _stable_hull_indices(n_e, e_vs_ref)
+    hull_n = [n_e[index] if index in hull else float("inf") for index in range(len(n_e))]
+    band = _select_hull_band(Eh, hull_n, e_vs_ref)
 
     conc = {name: 0.0 for name in chain.track_species}
     level_conc = _within_level_distribution(pH, levels[band], c_tot, chain)
     conc.update(level_conc)
 
-    neighbor = _near_boundary(Eh, bounds, band)
-    if neighbor is not None and 0 <= neighbor < n:
-        other = _within_level_distribution(pH, levels[neighbor], c_tot * 0.5, chain)
-        for name in chain.track_species:
-            conc[name] = level_conc.get(name, 0.0) * 0.5 + other.get(name, 0.0) * 0.5
-
+    bg = dict(background_ions or {})
+    bg.setdefault("H+", 10.0 ** (-float(pH)))
+    bg.setdefault("OH-", 10.0 ** (float(pH) - 14.0))
     precip = precipitation_edges if precipitation_edges is not None else chain.precipitation_edges
-    solid = _check_ksp(conc, precip, background_ions)
+    solid = _check_ksp(conc, precip, bg)
     if solid is not None:
         return {name: 0.0 for name in chain.track_species} | {solid: c_tot}
 
@@ -698,17 +1189,39 @@ def graph_speciation(
     return merged, best_index
 
 
-def boundary_species_at_pH(boundary: PourbaixBoundary, pH: float, graph: PourbaixGraph) -> tuple[str, str]:
+def boundary_species_at_pH(
+    boundary: PourbaixBoundary,
+    pH: float,
+    graph: PourbaixGraph,
+    totals: Optional[dict[str, float]] = None,
+    background_ions: Optional[dict[str, float]] = None,
+) -> tuple[str, str]:
     """Species in equilibrium along ``boundary`` at ``pH``."""
-    if boundary.kind == "acid_base":
+    if boundary.kind in {"acid_base", "ksp"}:
         return boundary.left, boundary.right
     if boundary.kind == "redox":
         for chain in graph.chains:
             if chain.element != boundary.chain_element:
                 continue
             level_low, level_high = boundary.level_pair
-            left = _prevalent_form(pH, chain.oxidation_levels[level_low], chain.pka_pairs)
-            right = _prevalent_form(pH, chain.oxidation_levels[level_high], chain.pka_pairs)
+            ox_level = chain.oxidation_levels[level_low]
+            red_level = chain.oxidation_levels[level_high]
+            left = _prevalent_form(pH, ox_level, chain)
+            right = _prevalent_form(pH, red_level, chain)
+            c_tot = float((totals or {}).get(chain.element, 0.0))
+            solid = _solid_from_ksp(
+                pH,
+                ox_level,
+                c_tot,
+                chain,
+                graph.precipitation_edges,
+                background_ions,
+            )
+            if solid is not None:
+                if left in ox_level:
+                    left = solid
+                if right in ox_level:
+                    right = solid
             return left, right
     return boundary.left, boundary.right
 
@@ -767,52 +1280,99 @@ def compute_analytic_geometry(
     eh_min: float = -1.5,
     eh_max: float = 1.5,
     junction_labels: Optional[dict[tuple[str, ...], str]] = None,
+    totals: Optional[dict[str, float]] = None,
+    background_ions: Optional[dict[str, float]] = None,
 ) -> tuple[list[PourbaixBoundary], list[PourbaixJunction]]:
     pH_samples = np.linspace(pH_min, pH_max, max(int(pH_steps), 2))
     boundaries: list[PourbaixBoundary] = []
 
     for chain in graph.chains:
-        n = len(chain.oxidation_levels)
-        for i in range(n - 1):
-            eh_curve = []
-            left_labels = []
-            right_labels = []
-            for pH in pH_samples:
-                left = _prevalent_form(float(pH), chain.oxidation_levels[i], chain.pka_pairs)
-                right = _prevalent_form(float(pH), chain.oxidation_levels[i + 1], chain.pka_pairs)
-                left_labels.append(left)
-                right_labels.append(right)
-                eh_curve.append(boundary_Eh(float(pH), left, right, chain))
-            boundaries.append(
-                PourbaixBoundary(
-                    left=left_labels[0],
-                    right=right_labels[0],
-                    kind="redox",
-                    pH=pH_samples.copy(),
-                    Eh=np.asarray(eh_curve, dtype=float),
-                    level_pair=(i, i + 1),
-                    chain_element=chain.element,
-                )
-            )
-
-        seen_pka: set[tuple[str, str]] = set()
-        for level_index, level in enumerate(chain.oxidation_levels):
-            for acid, base, pka in chain.pka_pairs:
-                if (acid, base) in seen_pka:
+        pair_points: dict[tuple[int, int], list[tuple[float, float, str, str]]] = defaultdict(list)
+        pH_step = float(pH_samples[1] - pH_samples[0]) if len(pH_samples) > 1 else 0.05
+        for pH in pH_samples:
+            pH_value = float(pH)
+            forms, n_e, e_vs_ref = _level_formation(chain, pH_value)
+            hull = _stable_hull_indices(n_e, e_vs_ref)
+            for left_i, right_i in zip(hull, hull[1:]):
+                n_left = n_e[left_i]
+                n_right = n_e[right_i]
+                if abs(n_right - n_left) < 1e-15:
                     continue
-                if acid in level and base in level:
-                    seen_pka.add((acid, base))
-                    boundaries.append(
-                        PourbaixBoundary(
-                            left=acid,
-                            right=base,
-                            kind="acid_base",
-                            pH=np.asarray([pka, pka], dtype=float),
-                            Eh=np.asarray([eh_min, eh_max], dtype=float),
-                            level_pair=(level_index, level_index),
-                            chain_element=chain.element,
-                        )
+                eh = (n_right * e_vs_ref[right_i] - n_left * e_vs_ref[left_i]) / (n_right - n_left)
+                pair_points[(left_i, right_i)].append(
+                    (pH_value, float(eh), forms[left_i], forms[right_i])
+                )
+
+        for (left_i, right_i), points in pair_points.items():
+            runs: list[list[tuple[float, float, str, str]]] = []
+            current: list[tuple[float, float, str, str]] = []
+            for point in points:
+                if current and point[0] - current[-1][0] > 1.5 * pH_step:
+                    runs.append(current)
+                    current = []
+                current.append(point)
+            if current:
+                runs.append(current)
+            for run in runs:
+                if len(run) < 2:
+                    continue
+                boundaries.append(
+                    PourbaixBoundary(
+                        left=run[0][2],
+                        right=run[0][3],
+                        kind="redox",
+                        pH=np.asarray([item[0] for item in run], dtype=float),
+                        Eh=np.asarray([item[1] for item in run], dtype=float),
+                        level_pair=(left_i, right_i),
+                        chain_element=chain.element,
                     )
+                )
+
+        for level_index, level in enumerate(chain.oxidation_levels):
+            for acid, base, pH_cross in _within_level_crossovers(level, chain, pH_min=pH_min, pH_max=pH_max):
+                forms, n_e, e_vs_ref = _level_formation(chain, pH_cross)
+                if level_index not in _stable_hull_indices(n_e, e_vs_ref):
+                    continue
+                boundaries.append(
+                    PourbaixBoundary(
+                        left=acid,
+                        right=base,
+                        kind="acid_base",
+                        pH=np.asarray([pH_cross, pH_cross], dtype=float),
+                        Eh=np.asarray([eh_min, eh_max], dtype=float),
+                        level_pair=(level_index, level_index),
+                        chain_element=chain.element,
+                    )
+                )
+
+        if totals:
+            c_tot = float(totals.get(chain.element, 0.0))
+            for edge in graph.precipitation_edges:
+                pH_cross = _ksp_crossover_pH(
+                    chain,
+                    edge,
+                    c_tot,
+                    pH_min=pH_min,
+                    pH_max=pH_max,
+                    steps=max(int(pH_steps) * 2, 400),
+                    background=background_ions,
+                )
+                if pH_cross is None:
+                    continue
+                level = _level_containing_ksp_ions(chain, edge)
+                if level is None:
+                    continue
+                aqueous = _prevalent_form(pH_cross, level, chain)
+                boundaries.append(
+                    PourbaixBoundary(
+                        left=aqueous,
+                        right=edge.solid,
+                        kind="ksp",
+                        pH=np.asarray([pH_cross, pH_cross], dtype=float),
+                        Eh=np.asarray([eh_min, eh_max], dtype=float),
+                        chain_element=chain.element,
+                    )
+                )
 
     boundaries.append(
         PourbaixBoundary(

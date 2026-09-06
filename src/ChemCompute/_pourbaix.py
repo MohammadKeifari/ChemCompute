@@ -22,6 +22,7 @@ from ._pourbaix_graph import (
     element_totals_from_env,
     format_junction_plot_label,
     graph_speciation,
+    _line_intersection,
 )
 from ._titration import _find_h_plus_index
 
@@ -402,13 +403,16 @@ def _dominant_acid_base_lines(
     pH_max: float,
     eh_min: float,
     eh_max: float,
+    graph: Optional[PourbaixGraph] = None,
+    totals: Optional[dict[str, float]] = None,
+    background_ions: Optional[dict[str, float]] = None,
 ) -> list[tuple[int, int, np.ndarray, np.ndarray]]:
-    """Vertical pH boundaries between dominant acid/base neighbors."""
+    """Vertical pH boundaries between dominant acid/base or Ksp neighbors."""
     lines: list[tuple[int, int, np.ndarray, np.ndarray]] = []
     acid_base_targets = {
         frozenset({boundary.left, boundary.right})
         for boundary in analytic_boundaries
-        if boundary.kind == "acid_base"
+        if boundary.kind in {"acid_base", "ksp"}
     }
     use_grid_only = not acid_base_targets
 
@@ -422,7 +426,7 @@ def _dominant_acid_base_lines(
         pH_target: Optional[float] = None
         if not use_grid_only:
             for boundary in analytic_boundaries:
-                if boundary.kind == "acid_base" and {boundary.left, boundary.right} == {name_a, name_b}:
+                if boundary.kind in {"acid_base", "ksp"} and {boundary.left, boundary.right} == {name_a, name_b}:
                     pH_target = float(boundary.pH[0])
                     break
 
@@ -450,6 +454,50 @@ def _dominant_acid_base_lines(
                     np.asarray([eh_lo, eh_hi], dtype=float),
                 )
             )
+
+    if graph is None or totals is None:
+        return lines
+
+    covered = {
+        frozenset({track_species[left], track_species[right]})
+        for left, right, _, _ in lines
+    }
+    name_to_index = {name: index for index, name in enumerate(track_species)}
+    eh_samples = np.linspace(eh_min, eh_max, 250)
+    for boundary in analytic_boundaries:
+        if boundary.kind not in {"acid_base", "ksp"}:
+            continue
+        target = frozenset({boundary.left, boundary.right})
+        if target in covered:
+            continue
+        idx_a = name_to_index.get(boundary.left)
+        idx_b = name_to_index.get(boundary.right)
+        if idx_a is None or idx_b is None:
+            continue
+        pH_line = float(np.clip(float(boundary.pH[0]), pH_min, pH_max))
+        active = np.array(
+            [
+                _on_dominant_interface(
+                    pH_line,
+                    float(eh),
+                    idx_a,
+                    idx_b,
+                    graph,
+                    totals,
+                    track_species,
+                    background_ions=background_ions,
+                    grid_pH=grid_pH,
+                )
+                for eh in eh_samples
+            ],
+            dtype=bool,
+        )
+        pH_curve = np.full(len(eh_samples), pH_line)
+        for pH_seg, eh_seg in _split_active_segments(pH_curve, eh_samples, active):
+            if len(pH_seg) < 2:
+                continue
+            lines.append((min(idx_a, idx_b), max(idx_a, idx_b), pH_seg, eh_seg))
+            covered.add(target)
     return lines
 
 
@@ -472,7 +520,7 @@ def _clip_curve_to_dominant_pair(
     background_ions: Optional[dict[str, float]] = None,
     grid_pH: Optional[np.ndarray] = None,
 ) -> list[tuple[np.ndarray, np.ndarray]]:
-    if boundary.kind == "acid_base":
+    if boundary.kind in {"acid_base", "ksp"}:
         return []
     active = np.zeros(len(pH_curve), dtype=bool)
     target = {name_a, name_b}
@@ -481,7 +529,13 @@ def _clip_curve_to_dominant_pair(
         Eh = float(eh_curve[index])
         if pH < pH_min or pH > pH_max or Eh < eh_min or Eh > eh_max:
             continue
-        left, right = boundary_species_at_pH(boundary, pH, graph)
+        left, right = boundary_species_at_pH(
+            boundary,
+            pH,
+            graph,
+            totals=totals,
+            background_ions=background_ions,
+        )
         if {left, right} != target:
             continue
         if not _on_dominant_interface(
@@ -497,6 +551,11 @@ def _clip_curve_to_dominant_pair(
         ):
             continue
         active[index] = True
+    if np.any(active):
+        dilated = active.copy()
+        dilated[1:] |= active[:-1]
+        dilated[:-1] |= active[1:]
+        active = dilated
     return _split_active_segments(pH_curve, eh_curve, active)
 
 
@@ -524,7 +583,7 @@ def _dominant_analytic_boundary_lines(
         name_a = track_species[idx_a]
         name_b = track_species[idx_b]
         for boundary in analytic_boundaries:
-            if boundary.kind in {"water", "acid_base"}:
+            if boundary.kind in {"water", "acid_base", "ksp"}:
                 continue
             for pH_seg, eh_seg in _clip_curve_to_dominant_pair(
                 boundary.pH,
@@ -557,6 +616,9 @@ def _dominant_analytic_boundary_lines(
             pH_max=pH_max,
             eh_min=eh_min,
             eh_max=eh_max,
+            graph=graph,
+            totals=totals,
+            background_ions=background_ions,
         )
     )
     return lines
@@ -846,6 +908,111 @@ def _dominant_junction_points(
             )
         )
     return assign_junction_point_ids(junctions)
+
+
+def _closest_point_on_polyline(
+    pH: float,
+    Eh: float,
+    xs: np.ndarray,
+    ys: np.ndarray,
+) -> tuple[float, float]:
+    best_x = float(xs[0])
+    best_y = float(ys[0])
+    best_d = (best_x - pH) ** 2 + (best_y - Eh) ** 2
+    for index in range(len(xs) - 1):
+        x1, y1 = float(xs[index]), float(ys[index])
+        x2, y2 = float(xs[index + 1]), float(ys[index + 1])
+        dx = x2 - x1
+        dy = y2 - y1
+        length2 = dx * dx + dy * dy
+        if length2 < 1e-24:
+            qx, qy = x1, y1
+        else:
+            t = max(0.0, min(1.0, ((pH - x1) * dx + (Eh - y1) * dy) / length2))
+            qx = x1 + t * dx
+            qy = y1 + t * dy
+        dist = (qx - pH) ** 2 + (qy - Eh) ** 2
+        if dist < best_d:
+            best_d = dist
+            best_x, best_y = qx, qy
+    return best_x, best_y
+
+
+def _snap_junctions_to_boundary_lines(
+    junctions: Sequence[PourbaixJunction],
+    equal_boundary_lines: Sequence[tuple[int, int, np.ndarray, np.ndarray]],
+    track_species: Sequence[str],
+    *,
+    pH_tol: float,
+    eh_tol: float,
+) -> list[PourbaixJunction]:
+    """Move grid triple-points onto nearby intersections of the drawn boundary lines."""
+    bounds: list[tuple[frozenset[str], PourbaixBoundary]] = []
+    for left, right, pH_line, eh_line in equal_boundary_lines:
+        if len(pH_line) < 2:
+            continue
+        name_a = track_species[left]
+        name_b = track_species[right]
+        bounds.append(
+            (
+                frozenset({name_a, name_b}),
+                PourbaixBoundary(
+                    left=name_a,
+                    right=name_b,
+                    kind="redox",
+                    pH=np.asarray(pH_line, dtype=float),
+                    Eh=np.asarray(eh_line, dtype=float),
+                ),
+            )
+        )
+    pH_tol = max(float(pH_tol), 1e-9)
+    eh_tol = max(float(eh_tol), 1e-9)
+    for junction in junctions:
+        species = set(junction.species)
+        matching = [boundary for pair, boundary in bounds if pair <= species]
+        verticals = [
+            boundary
+            for boundary in matching
+            if abs(float(boundary.pH[0]) - float(boundary.pH[-1])) < 1e-6
+        ]
+        others = [boundary for boundary in matching if boundary not in verticals]
+        if verticals:
+            vertical = min(verticals, key=lambda item: abs(float(item.pH[0]) - junction.pH))
+            pH_snap = float(vertical.pH[0])
+            eh_values = []
+            for boundary in others:
+                _, qy = _closest_point_on_polyline(pH_snap, junction.Eh, boundary.pH, boundary.Eh)
+                eh_values.append(qy)
+            if abs(float(vertical.Eh[0]) - junction.Eh) <= 4.0 * eh_tol:
+                eh_values.append(float(vertical.Eh[0]))
+            if abs(float(vertical.Eh[-1]) - junction.Eh) <= 4.0 * eh_tol:
+                eh_values.append(float(vertical.Eh[-1]))
+            if eh_values:
+                junction.pH = pH_snap
+                junction.Eh = float(min(eh_values, key=lambda eh: abs(eh - junction.Eh)))
+                continue
+        best: Optional[tuple[float, float, float]] = None
+        for i, first in enumerate(matching):
+            for second in matching[i + 1 :]:
+                for px, py in _line_intersection(first, second):
+                    score = ((px - junction.pH) / pH_tol) ** 2 + ((py - junction.Eh) / eh_tol) ** 2
+                    if score <= 4.0 and (best is None or score < best[0]):
+                        best = (score, px, py)
+        if best is None and matching:
+            snapped: list[tuple[float, float]] = []
+            for boundary in matching:
+                qx, qy = _closest_point_on_polyline(junction.pH, junction.Eh, boundary.pH, boundary.Eh)
+                score = ((qx - junction.pH) / pH_tol) ** 2 + ((qy - junction.Eh) / eh_tol) ** 2
+                if score <= 4.0:
+                    snapped.append((qx, qy))
+            if snapped:
+                junction.pH = float(np.mean([pt[0] for pt in snapped]))
+                junction.Eh = float(np.mean([pt[1] for pt in snapped]))
+                continue
+        if best is not None:
+            junction.pH = best[1]
+            junction.Eh = best[2]
+    return list(junctions)
 
 
 @dataclass
@@ -1462,6 +1629,8 @@ class Pourbaix:
                 eh_min=self.Eh_min,
                 eh_max=self.Eh_max,
                 junction_labels=self.junction_labels,
+                totals=totals,
+                background_ions=self.background_ions,
             )
             geometry_source = "analytic"
 
@@ -1486,6 +1655,15 @@ class Pourbaix:
             dominant,
             track_species,
             junction_labels=self.junction_labels,
+        )
+        pH_step = float(pH_values[1] - pH_values[0]) if len(pH_values) > 1 else 0.05
+        eh_step = float(eh_values[1] - eh_values[0]) if len(eh_values) > 1 else 0.02
+        dominant_junctions = _snap_junctions_to_boundary_lines(
+            dominant_junctions,
+            equal_lines,
+            track_species,
+            pH_tol=2.0 * pH_step,
+            eh_tol=2.0 * eh_step,
         )
 
         return PourbaixResult(

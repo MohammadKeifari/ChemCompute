@@ -12,8 +12,13 @@ from ChemCompute._pourbaix_graph import (
     format_junction_label,
     graph_speciation,
     element_totals_from_env,
+    _build_species_chain,
+    _ksp_crossover_pH,
+    _level_formation,
+    _select_hull_band,
+    _upper_hull_indices,
 )
-from test_pourbaix import ka, selenium_environment
+from test_pourbaix import amt_environment, carbon_environment, iron_environment, ka, selenium_environment
 
 
 def aq(formula: str) -> Compound:
@@ -220,3 +225,98 @@ def test_equilibrium_geometry_source():
     ).run()
     assert diagram.geometry_source == "grid"
     assert diagram.analytic_boundaries == []
+
+
+def test_carbon_half_reaction_chain_order():
+    chain = build_pourbaix_graph(carbon_environment()).chains[0]
+    names = {hr.name for hr in chain.half_reactions}
+    assert names >= {
+        "CO2/H2C2O4",
+        "CO2/HCO2H",
+        "HCO2H/CH2O",
+        "CH2O/CH3OH",
+    }
+    assert chain.oxidation_levels[0][0] == "CO2"
+    assert any("H2C2O4" in level for level in chain.oxidation_levels)
+    assert any("HCO2H" in level for level in chain.oxidation_levels)
+
+
+def test_hull_band_monotonic_windows():
+    n_e = [0.0, 2.0, 6.0, 8.0]
+    e_vs_ref = [0.0, 1.15, (2 * 1.15 + 4 * 0.74) / 6.0, (2 * 1.15 + 4 * 0.74 + 2 * (-0.11)) / 8.0]
+    assert _select_hull_band(1.30, n_e, e_vs_ref) == 0
+    assert _select_hull_band(0.90, n_e, e_vs_ref) == 1
+    assert _select_hull_band(0.50, n_e, e_vs_ref) == 2
+    assert _select_hull_band(-0.40, n_e, e_vs_ref) == 3
+    assert _upper_hull_indices(n_e, e_vs_ref) == [0, 1, 2, 3]
+
+
+def test_hull_skips_disproportionating_carbon_rungs():
+    chain = build_pourbaix_graph(carbon_environment()).chains[0]
+    forms, n_e, e_vs_ref = _level_formation(chain, 0.0)
+    hull = _upper_hull_indices(n_e, e_vs_ref)
+    hull_species = {forms[index] for index in hull}
+    assert "CO2" in hull_species
+    assert "CH3OH" in hull_species
+    assert "H2C2O4" not in hull_species
+    assert "CH2O" not in hull_species
+    env = carbon_environment()
+    graph = build_pourbaix_graph(env)
+    totals = element_totals_from_env(env, graph)
+    _, idx_high = graph_speciation(0.0, 0.2, graph, totals)
+    _, idx_low = graph_speciation(0.0, -0.6, graph, totals)
+    assert graph.all_track_species[idx_high] == "CO2"
+    assert graph.all_track_species[idx_low] == "CH3OH"
+    co2_meoh = boundary_Eh(0.0, "CO2", "CH3OH", chain)
+    assert co2_meoh == pytest.approx((2 * (-0.20) + 2 * (-0.03) + 2 * 0.13) / 6.0, abs=0.05)
+
+
+def test_iron_half_reaction_chain_and_ksp():
+    env = iron_environment()
+    graph = build_pourbaix_graph(env)
+    chain = graph.chains[0]
+    assert chain.element == "Fe"
+    assert [level[0] for level in chain.oxidation_levels] == ["Fe+3", "Fe+2", "Fe"]
+    totals = element_totals_from_env(env, graph)
+    _, idx_fe3 = graph_speciation(0.0, 1.0, graph, totals)
+    _, idx_fe2 = graph_speciation(0.0, 0.2, graph, totals)
+    _, idx_fe = graph_speciation(0.0, -0.8, graph, totals)
+    _, idx_oh = graph_speciation(6.0, 1.0, graph, totals)
+    assert graph.all_track_species[idx_fe3] == "Fe+3"
+    assert graph.all_track_species[idx_fe2] == "Fe+2"
+    assert graph.all_track_species[idx_fe] == "Fe"
+    assert graph.all_track_species[idx_oh] == "Fe(OH)3"
+    edge = graph.precipitation_edges[0]
+    pH_ksp = _ksp_crossover_pH(
+        chain,
+        edge,
+        1e-3,
+        pH_min=0.0,
+        pH_max=14.0,
+    )
+    assert pH_ksp == pytest.approx(2.57, abs=0.15)
+
+
+def test_pka_chain_includes_conjugate_acids():
+    pairs = [("AMTH+", "AMT", 9.0), ("AMTRH2+2", "AMTRH+", 5.5), ("AMTRH+", "AMTR", 9.8)]
+    assert _build_species_chain("AMT", pairs) == ["AMTH+", "AMT"]
+    assert _build_species_chain("AMTR", pairs) == ["AMTRH2+2", "AMTRH+", "AMTR"]
+    assert _build_species_chain("Fe+3", [("Fe+3", "FeOH+2", 2.2)]) == ["Fe+3", "FeOH+2"]
+
+
+def test_amt_half_reaction_chain_and_speciation():
+    env = amt_environment()
+    graph = build_pourbaix_graph(env)
+    chain = graph.chains[0]
+    assert chain.element == "A"
+    assert [level[0] for level in chain.oxidation_levels] == ["AMTOH+2", "AMTH+", "AMTRH2+2"]
+    totals = element_totals_from_env(env, graph)
+    _, idx_o = graph_speciation(0.0, 1.2, graph, totals)
+    _, idx_a = graph_speciation(2.0, 0.8, graph, totals)
+    _, idx_r = graph_speciation(0.0, 0.0, graph, totals)
+    assert graph.all_track_species[idx_o] == "AMTOH+2"
+    assert graph.all_track_species[idx_a] == "AMTH+"
+    assert graph.all_track_species[idx_r] == "AMTRH2+2"
+    assert boundary_Eh(0.0, "AMTOH+2", "AMTH+", chain) == pytest.approx(0.74 + 0.05916 * 3.0, abs=0.02)
+    assert boundary_Eh(12.0, "AMTO+", "AMT", chain) == pytest.approx(0.74, abs=0.02)
+    assert boundary_Eh(12.0, "AMT", "AMTR", chain) == pytest.approx(0.54 - 0.05916 * 12.0, abs=0.03)
