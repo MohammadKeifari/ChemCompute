@@ -423,6 +423,24 @@ inh = Compound(
 A = uvvis_spectrum(env, wavelengths=[450e-9, 500e-9], path_length=0.01)
 ```
 
+A library of common molecules, ions, and complexes lives in `ChemCompute.compounds`. Melting and boiling points are in kelvin. UV-Vis data (where a clear aqueous envelope exists) are stored as connected (wavelength, ε) points — a piecewise-linear trace, not a single λmax spike. The default 0.01 m path length is a 1 cm cuvette:
+
+```python
+from ChemCompute import Reaction, uvvis_spectrum
+from ChemCompute.compounds import water, h_plus, oh_minus, mno4, fescn
+
+rxn = Reaction.from_string(
+    f"{water.token} > {h_plus.token} & {oh_minus.token}",
+    concentrations=[1.0, 1e-7, 1e-7],
+    K=1e-14,
+)
+# mno4.spectrum traces the permanganate visible band (peak 525 nm);
+# fescn is the FeSCN²⁺ LMCT envelope (peak 447 nm)
+A = uvvis_spectrum(env, wavelengths=[500e-9, 525e-9, 550e-9], path_length=0.01)
+```
+
+Look up a species with `compounds.get("H2O")`. Library objects are shared singletons — copy before mutating them.
+
 ---
 
 ## Enzyme kinetics
@@ -547,6 +565,7 @@ src/ChemCompute/
   _uvvis.py        Beer-Lambert spectra
   _bio_kinetics.py Michaelis-Menten and inhibition integrator
   bio_templates/   Premade enzyme-kinetics environments
+  compounds/       Library of common molecules, ions, and complexes
 tests/
   helpers.py       Shared environment builders for tests
   test_general.py  Compound and Reaction
