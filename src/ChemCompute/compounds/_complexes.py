@@ -1,39 +1,62 @@
 """Coordination complexes and acid–base indicators with UV-Vis envelopes."""
 
-from ._builders import compound, vis_bands, vis_nm
+from ._builders import compound, library, vis_bands, vis_nm
 
 # Fe(III) thiocyanate — Frank & Oswalt 447 nm; broad LMCT toward ~470 nm
-fescn = compound(
+@library
+def fescn():
+    return compound(
     "FeSCN+2", "aq", charge=2, spectrum=vis_bands((447, 4700.0, 4500.0))
 )
 
 # hexacyanoferrates
-fe_cn6_3minus = compound(
+@library
+def fe_cn6_3minus():
+    return compound(
     "Fe(CN)6-3",
     "aq",
     charge=-3,
     spectrum=vis_bands((260, 1200.0, 4000.0), (420, 1040.0, 3000.0)),
 )
-fe_cn6_4minus = compound("Fe(CN)6-4", "aq", charge=-4)
+@library
+def fe_cn6_4minus():
+    return compound("Fe(CN)6-4", "aq", charge=-4)
 
 # ammine complexes
-cu_nh3_4_2plus = compound(
+@library
+def cu_nh3_4_2plus():
+    return compound(
     "Cu(NH3)4+2", "aq", charge=2, spectrum=vis_bands((600, 56.0), fwhm_cm=3500.0)
 )
-ni_nh3_6_2plus = compound(
+@library
+def ni_nh3_6_2plus():
+    return compound(
     "Ni(NH3)6+2", "aq", charge=2, spectrum=vis_bands((355, 6.5), (571, 4.8))
 )
-co_nh3_6_3plus = compound(
+@library
+def co_nh3_6_3plus():
+    return compound(
     "Co(NH3)6+3", "aq", charge=3, spectrum=vis_bands((339, 46.0), (475, 56.0))
 )
-cr_nh3_6_3plus = compound(
+@library
+def cr_nh3_6_3plus():
+    return compound(
     "Cr(NH3)6+3", "aq", charge=3, spectrum=vis_bands((350, 33.0), (462, 40.0))
 )
-ag_nh3_2_plus = compound("Ag(NH3)2+", "aq", charge=1)
-zn_nh3_4_2plus = compound("Zn(NH3)4+2", "aq", charge=2)
+@library
+def ag_nh3_2_plus():
+    return compound("Ag(NH3)2+", "aq", charge=1)
+@library
+def agcl2():
+    return compound("AgCl2-", "aq", charge=-1)
+@library
+def zn_nh3_4_2plus():
+    return compound("Zn(NH3)4+2", "aq", charge=2)
 
 # tetrahalometallates
-co_cl4_2minus = compound(
+@library
+def co_cl4_2minus():
+    return compound(
     "CoCl4-2",
     "aq",
     charge=-2,
@@ -49,13 +72,19 @@ co_cl4_2minus = compound(
         (800, 0.0),
     ),
 )
-ni_cl4_2minus = compound("NiCl4-2", "aq", charge=-2)
-cu_cl4_2minus = compound(
+@library
+def ni_cl4_2minus():
+    return compound("NiCl4-2", "aq", charge=-2)
+@library
+def cu_cl4_2minus():
+    return compound(
     "CuCl4-2", "aq", charge=-2, spectrum=vis_bands((400, 80.0, 4000.0))
 )
 
 # phenanthroline / bipyridine
-ferroin = compound(
+@library
+def ferroin():
+    return compound(
     "Fe(phen)3+2",
     "aq",
     charge=2,
@@ -70,7 +99,9 @@ ferroin = compound(
         (640, 0.0),
     ),
 )
-ru_bpy3_2plus = compound(
+@library
+def ru_bpy3_2plus():
+    return compound(
     "Ru(bpy)3+2",
     "aq",
     charge=2,
@@ -78,11 +109,17 @@ ru_bpy3_2plus = compound(
 )
 
 # oxalate / EDTA-type teaching complexes
-fe_ox3_3minus = compound("Fe(C2O4)3-3", "aq", charge=-3)
-ni_en3_2plus = compound(
+@library
+def fe_ox3_3minus():
+    return compound("Fe(C2O4)3-3", "aq", charge=-3)
+@library
+def ni_en3_2plus():
+    return compound(
     "Ni(en)3+2", "aq", charge=2, spectrum=vis_bands((545, 6.5))
 )
-ferrocene = compound(
+@library
+def ferrocene():
+    return compound(
     "Fe(C5H5)2",
     "s",
     mp=446.0,
@@ -91,7 +128,9 @@ ferrocene = compound(
 )
 
 # indicators / dyes (aqueous envelopes around published λmax)
-methylene_blue = compound(
+@library
+def methylene_blue():
+    return compound(
     "MB+",
     "aq",
     charge=1,
@@ -107,24 +146,35 @@ methylene_blue = compound(
         (750, 0.0),
     ),
 )
-crystal_violet = compound(
+@library
+def crystal_violet():
+    return compound(
     "CV+", "aq", charge=1, spectrum=vis_bands((590, 87000.0, 1200.0))
 )
-fluorescein = compound(
+@library
+def fluorescein():
+    return compound(
     "Fl-2", "aq", charge=-2, spectrum=vis_bands((490, 76900.0, 1400.0))
 )
-phenolphthalein_pink = compound(
+@library
+def phenolphthalein_pink():
+    return compound(
     "HIn-2", "aq", charge=-2, spectrum=vis_bands((552, 26000.0, 1500.0))
 )
-methyl_orange = compound(
+@library
+def methyl_orange():
+    return compound(
     "MO-", "aq", charge=-1, spectrum=vis_bands((464, 22600.0, 1800.0))
 )
-bromothymol_blue = compound(
+@library
+def bromothymol_blue():
+    return compound(
     "BTB-", "aq", charge=-1, spectrum=vis_bands((616, 32500.0, 1400.0))
 )
 
 __all__ = [
     "ag_nh3_2_plus",
+    "agcl2",
     "bromothymol_blue",
     "co_cl4_2minus",
     "co_nh3_6_3plus",

@@ -11,6 +11,22 @@ T_REF = 298.0
 _LN2_4 = 4.0 * math.log(2.0)
 
 
+def library(fn):
+    """Cache a library object so every call returns the same instance."""
+    cached = []
+
+    def getter():
+        if not cached:
+            cached.append(fn())
+        return cached[0]
+
+    getter.__name__ = fn.__name__
+    getter.__qualname__ = getattr(fn, "__qualname__", fn.__name__)
+    getter.__doc__ = fn.__doc__
+    getter.__module__ = fn.__module__
+    return getter
+
+
 def phase_at(phase, temperature=T_REF):
     return [{"phase": phase, "temperature": temperature}]
 

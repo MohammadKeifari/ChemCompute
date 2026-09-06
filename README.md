@@ -106,15 +106,17 @@ env = Enviroment(kw, ka, hr, concentrations={"HSeO4-": 1.0}, buffer=["H+"])
 env.set_excess({"H2O": XS()})  # optional env-level excess override
 ```
 
-To keep a Compound you already built (library entry with spectrum, mp, bp), interpolate `.token` — not `f"{water}"`, which still prints the formula:
+To keep a Compound you already built (library entry with spectrum, mp, bp), interpolate `.token` — not `f"{water()}"`, which still prints the formula:
 
 ```python
+from ChemCompute.compounds import water
+
 kw = Reaction.from_string(
-    f"{water.token} > H+ & OH-",
+    f"{water().token} > H+ & OH-",
     concentrations={"H2O": XS(55.5)},
     K=1e-14,
 )
-assert kw.reactants[0]["compound"] is water
+assert kw.reactants[0]["compound"] is water()
 ```
 
 **Migration:** replace `+` between species with `&` (e.g. `A + B > C` → `A & B > C`; `Fe+3 + @e = Fe+2` → `Fe+3 & @e = Fe+2`).
@@ -423,23 +425,82 @@ inh = Compound(
 A = uvvis_spectrum(env, wavelengths=[450e-9, 500e-9], path_length=0.01)
 ```
 
-A library of common molecules, ions, and complexes lives in `ChemCompute.compounds`. Melting and boiling points are in kelvin. UV-Vis data (where a clear aqueous envelope exists) are stored as connected (wavelength, ε) points — a piecewise-linear trace, not a single λmax spike. The default 0.01 m path length is a 1 cm cuvette:
+A library of common molecules, ions, and complexes lives in `ChemCompute.compounds`. Each name is a function that returns the shared compound. Melting and boiling points are in kelvin. UV-Vis data (where a clear aqueous envelope exists) are stored as connected (wavelength, ε) points — a piecewise-linear trace, not a single λmax spike. The default 0.01 m path length is a 1 cm cuvette:
 
 ```python
 from ChemCompute import Reaction, uvvis_spectrum
 from ChemCompute.compounds import water, h_plus, oh_minus, mno4, fescn
 
 rxn = Reaction.from_string(
-    f"{water.token} > {h_plus.token} & {oh_minus.token}",
+    f"{water().token} > {h_plus().token} & {oh_minus().token}",
     concentrations=[1.0, 1e-7, 1e-7],
     K=1e-14,
 )
-# mno4.spectrum traces the permanganate visible band (peak 525 nm);
-# fescn is the FeSCN²⁺ LMCT envelope (peak 447 nm)
+# mno4().spectrum traces the permanganate visible band (peak 525 nm);
+# fescn() is the FeSCN²⁺ LMCT envelope (peak 447 nm)
 A = uvvis_spectrum(env, wavelengths=[500e-9, 525e-9, 550e-9], path_length=0.01)
 ```
 
-Look up a species with `compounds.get("H2O")`. Library objects are shared singletons — copy before mutating them.
+Look up a species with `compounds.get("H2O")`. `water()` always returns the same object.
+
+---
+
+## Reaction library
+
+`ChemCompute.reactions` names are functions that return the shared `Reaction` (same idea as `compounds`). Each has a tabulated `K` (or `infinite_K` for strong acids / analytical redox) and **every concentration 0**. Set amounts on the environment:
+
+```python
+from ChemCompute import Enviroment
+from ChemCompute.reactions import water_kw, acetic_acid, agcl_ksp, fescn_kf
+
+env = Enviroment(
+    water_kw(),
+    acetic_acid(),
+    agcl_ksp(),
+    fescn_kf(),
+    concentrations={"CH3COOH": 0.10, "Ag+": 1e-3},
+)
+```
+
+Included groups: water / weak and strong acids and bases, Ksp dissolution of common salts, overall complex formation (FeSCN²⁺, ammines, ferroin, triiodide, hexacyanoferrates), and a few irreversible redox titrations. Solids and liquid water are library compounds (activity 1, omitted from Q). `water_kw()` always returns the same reaction.
+
+---
+
+## Half-reaction library
+
+`ChemCompute.half_reactions` names are functions that return the shared `HalfReaction`. Each has a tabulated E° vs SHE (25 °C) and **every concentration 0**. Set amounts on the environment:
+
+```python
+from ChemCompute import Enviroment
+from ChemCompute.half_reactions import hydrogen, oxygen, iron_iii, permanganate
+
+env = Enviroment(
+    hydrogen(),
+    oxygen(),
+    iron_iii(),
+    concentrations={"Fe+3": 0.01, "Fe+2": 0.001},
+    buffer=["H+"],
+)
+```
+
+Included groups: water window (H⁺/H₂, O₂/H₂O, peroxide), halogen/halide, metal ions (Fe³⁺/Fe²⁺, Cu, Ag, Zn, …), oxoanions (MnO₄⁻, Cr₂O₇²⁻, NO₃⁻), and hexacyanoferrate. Library ions and liquid water are reused via `.token`. Metal solids are `M.s`. `hydrogen()` is the SHE (E° = 0); `she` is the same function.
+
+---
+
+## Environment library
+
+`ChemCompute.environments` couples related library reactions and half-reactions into a fresh `Enviroment` (concentrations start at 0). Polyprotic acids include every deprotonation plus Kw. Silver chloride includes both AgCl(s) precipitation and AgCl2- formation. `water_limits` is the O₂/H₂O and H⁺/H₂ window with Kw; `daniel_cell` is Cu²⁺/Cu with Zn²⁺/Zn:
+
+```python
+from ChemCompute.environments import phosphoric_acid, silver_chloride, copper_hydroxide_ammine, water_limits
+
+h3po4 = phosphoric_acid(concentrations={"H3PO4": 0.10})
+agcl = silver_chloride(concentrations={"Ag+": 1e-3, "Cl-": 0.10})
+cu = copper_hydroxide_ammine(concentrations={"Cu+2": 0.01, "NH3": 1.0})
+window = water_limits()
+```
+
+Each call returns an environment that uses the library reactions, half-reactions, and compounds directly (`water()`, `water_kw()`, `agcl()`, `hydrogen()` are the same objects every time). Amounts live on that environment.
 
 ---
 
@@ -566,6 +627,9 @@ src/ChemCompute/
   _bio_kinetics.py Michaelis-Menten and inhibition integrator
   bio_templates/   Premade enzyme-kinetics environments
   compounds/       Library of common molecules, ions, and complexes
+  reactions/       Library of acid–base, precipitation, complex, and redox reactions
+  half_reactions/  Library of aqueous half-reactions vs SHE
+  environments/    Coupled polyprotic, complex, precipitation, and redox environments
 tests/
   helpers.py       Shared environment builders for tests
   test_general.py  Compound and Reaction

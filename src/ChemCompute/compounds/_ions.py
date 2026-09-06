@@ -1,87 +1,219 @@
 """Aqueous ions. No mp/bp. Colored aqua ions and oxoanions carry UV-Vis envelopes."""
 
-from ._builders import compound, vis_bands, vis_nm
+from ._builders import compound, library, vis_bands, vis_nm
 
 # --- hydrogen / hydroxide ---
-h_plus = compound("H+", "aq", charge=1)
-h3o = compound("H3O+", "aq", charge=1)
-oh_minus = compound("OH-", "aq", charge=-1)
+@library
+def h_plus():
+    return compound("H+", "aq", charge=1)
+@library
+def h3o():
+    return compound("H3O+", "aq", charge=1)
+@library
+def oh_minus():
+    return compound("OH-", "aq", charge=-1)
 
 # --- alkali / alkaline earth ---
-li_plus = compound("Li+", "aq", charge=1)
-na_plus = compound("Na+", "aq", charge=1)
-k_plus = compound("K+", "aq", charge=1)
-rb_plus = compound("Rb+", "aq", charge=1)
-cs_plus = compound("Cs+", "aq", charge=1)
-be2 = compound("Be+2", "aq", charge=2)
-mg2 = compound("Mg+2", "aq", charge=2)
-ca2 = compound("Ca+2", "aq", charge=2)
-sr2 = compound("Sr+2", "aq", charge=2)
-ba2 = compound("Ba+2", "aq", charge=2)
+@library
+def li_plus():
+    return compound("Li+", "aq", charge=1)
+@library
+def na_plus():
+    return compound("Na+", "aq", charge=1)
+@library
+def k_plus():
+    return compound("K+", "aq", charge=1)
+@library
+def rb_plus():
+    return compound("Rb+", "aq", charge=1)
+@library
+def cs_plus():
+    return compound("Cs+", "aq", charge=1)
+@library
+def be2():
+    return compound("Be+2", "aq", charge=2)
+@library
+def mg2():
+    return compound("Mg+2", "aq", charge=2)
+@library
+def ca2():
+    return compound("Ca+2", "aq", charge=2)
+@library
+def sr2():
+    return compound("Sr+2", "aq", charge=2)
+@library
+def ba2():
+    return compound("Ba+2", "aq", charge=2)
 
 # --- p-block / post-transition ---
-al3 = compound("Al+3", "aq", charge=3)
-sn2 = compound("Sn+2", "aq", charge=2)
-sn4 = compound("Sn+4", "aq", charge=4)
-pb2 = compound("Pb+2", "aq", charge=2)
-bi3 = compound("Bi+3", "aq", charge=3)
-ag_plus = compound("Ag+", "aq", charge=1)
-cd2 = compound("Cd+2", "aq", charge=2)
-hg2 = compound("Hg+2", "aq", charge=2)
-zn2 = compound("Zn+2", "aq", charge=2)
+@library
+def al3():
+    return compound("Al+3", "aq", charge=3)
+@library
+def sn2():
+    return compound("Sn+2", "aq", charge=2)
+@library
+def sn4():
+    return compound("Sn+4", "aq", charge=4)
+@library
+def pb2():
+    return compound("Pb+2", "aq", charge=2)
+@library
+def bi3():
+    return compound("Bi+3", "aq", charge=3)
+@library
+def ag_plus():
+    return compound("Ag+", "aq", charge=1)
+@library
+def cd2():
+    return compound("Cd+2", "aq", charge=2)
+@library
+def hg2():
+    return compound("Hg+2", "aq", charge=2)
+@library
+def zn2():
+    return compound("Zn+2", "aq", charge=2)
 
 # --- d-block aqua ions (ligand-field envelopes around published λmax/ε) ---
-ti3 = compound("Ti+3", "aq", charge=3, spectrum=vis_bands((500, 6.0)))
-v2 = compound("V+2", "aq", charge=2, spectrum=vis_bands((560, 4.0), (850, 2.0)))
-v3 = compound("V+3", "aq", charge=3, spectrum=vis_bands((400, 8.0), (580, 6.0)))
-vo2 = compound("VO+2", "aq", charge=2, spectrum=vis_bands((760, 17.0), fwhm_cm=4000.0))
-cr2 = compound("Cr+2", "aq", charge=2, spectrum=vis_bands((710, 5.0)))
-cr3 = compound("Cr+3", "aq", charge=3, spectrum=vis_bands((407, 15.0), (575, 13.0)))
-mn2 = compound("Mn+2", "aq", charge=2)
-fe2 = compound("Fe+2", "aq", charge=2, spectrum=vis_bands((1000, 1.6), fwhm_cm=3000.0))
-fe3 = compound("Fe+3", "aq", charge=3)
-co_2plus = compound("Co+2", "aq", charge=2, spectrum=vis_bands((510, 4.8)))
-co_3plus = compound("Co+3", "aq", charge=3)
-ni2 = compound("Ni+2", "aq", charge=2, spectrum=vis_bands((395, 5.0), (658, 2.0)))
-cu_plus = compound("Cu+", "aq", charge=1)
-cu2 = compound("Cu+2", "aq", charge=2, spectrum=vis_bands((800, 12.0), fwhm_cm=4000.0))
+@library
+def ti3():
+    return compound("Ti+3", "aq", charge=3, spectrum=vis_bands((500, 6.0)))
+@library
+def v2():
+    return compound("V+2", "aq", charge=2, spectrum=vis_bands((560, 4.0), (850, 2.0)))
+@library
+def v3():
+    return compound("V+3", "aq", charge=3, spectrum=vis_bands((400, 8.0), (580, 6.0)))
+@library
+def vo2():
+    return compound("VO+2", "aq", charge=2, spectrum=vis_bands((760, 17.0), fwhm_cm=4000.0))
+@library
+def cr2():
+    return compound("Cr+2", "aq", charge=2, spectrum=vis_bands((710, 5.0)))
+@library
+def cr3():
+    return compound("Cr+3", "aq", charge=3, spectrum=vis_bands((407, 15.0), (575, 13.0)))
+@library
+def mn2():
+    return compound("Mn+2", "aq", charge=2)
+@library
+def fe2():
+    return compound("Fe+2", "aq", charge=2, spectrum=vis_bands((1000, 1.6), fwhm_cm=3000.0))
+@library
+def fe3():
+    return compound("Fe+3", "aq", charge=3)
+@library
+def co_2plus():
+    return compound("Co+2", "aq", charge=2, spectrum=vis_bands((510, 4.8)))
+@library
+def co_3plus():
+    return compound("Co+3", "aq", charge=3)
+@library
+def ni2():
+    return compound("Ni+2", "aq", charge=2, spectrum=vis_bands((395, 5.0), (658, 2.0)))
+@library
+def cu_plus():
+    return compound("Cu+", "aq", charge=1)
+@library
+def cu2():
+    return compound("Cu+2", "aq", charge=2, spectrum=vis_bands((800, 12.0), fwhm_cm=4000.0))
 
 # --- halides / simple anions ---
-f_minus = compound("F-", "aq", charge=-1)
-cl_minus = compound("Cl-", "aq", charge=-1)
-br_minus = compound("Br-", "aq", charge=-1)
-i_minus = compound("I-", "aq", charge=-1)
-hs_minus = compound("HS-", "aq", charge=-1)
-s_2minus = compound("S-2", "aq", charge=-2)
-cn_minus = compound("CN-", "aq", charge=-1)
-scn_minus = compound("SCN-", "aq", charge=-1)
-ocn_minus = compound("OCN-", "aq", charge=-1)
-n3_minus = compound("N3-", "aq", charge=-1)
-nh4 = compound("NH4+", "aq", charge=1)
+@library
+def f_minus():
+    return compound("F-", "aq", charge=-1)
+@library
+def cl_minus():
+    return compound("Cl-", "aq", charge=-1)
+@library
+def br_minus():
+    return compound("Br-", "aq", charge=-1)
+@library
+def i_minus():
+    return compound("I-", "aq", charge=-1)
+@library
+def hs_minus():
+    return compound("HS-", "aq", charge=-1)
+@library
+def s_2minus():
+    return compound("S-2", "aq", charge=-2)
+@library
+def cn_minus():
+    return compound("CN-", "aq", charge=-1)
+@library
+def scn_minus():
+    return compound("SCN-", "aq", charge=-1)
+@library
+def ocn_minus():
+    return compound("OCN-", "aq", charge=-1)
+@library
+def n3_minus():
+    return compound("N3-", "aq", charge=-1)
+@library
+def nh4():
+    return compound("NH4+", "aq", charge=1)
 
 # --- oxoanions ---
-no2_minus = compound("NO2-", "aq", charge=-1)
-no3_minus = compound("NO3-", "aq", charge=-1)
-so3_2minus = compound("SO3-2", "aq", charge=-2)
-hso3_minus = compound("HSO3-", "aq", charge=-1)
-so4_2minus = compound("SO4-2", "aq", charge=-2)
-hso4_minus = compound("HSO4-", "aq", charge=-1)
-s2o3_2minus = compound("S2O3-2", "aq", charge=-2)
-co3_2minus = compound("CO3-2", "aq", charge=-2)
-hco3_minus = compound("HCO3-", "aq", charge=-1)
-po4_3minus = compound("PO4-3", "aq", charge=-3)
-hpo4_2minus = compound("HPO4-2", "aq", charge=-2)
-h2po4_minus = compound("H2PO4-", "aq", charge=-1)
-clo_minus = compound("ClO-", "aq", charge=-1)
-clo2_minus = compound("ClO2-", "aq", charge=-1)
-clo3_minus = compound("ClO3-", "aq", charge=-1)
-clo4_minus = compound("ClO4-", "aq", charge=-1)
-ch3coo_minus = compound("CH3COO-", "aq", charge=-1)
-c2o4_2minus = compound("C2O4-2", "aq", charge=-2)
+@library
+def no2_minus():
+    return compound("NO2-", "aq", charge=-1)
+@library
+def no3_minus():
+    return compound("NO3-", "aq", charge=-1)
+@library
+def so3_2minus():
+    return compound("SO3-2", "aq", charge=-2)
+@library
+def hso3_minus():
+    return compound("HSO3-", "aq", charge=-1)
+@library
+def so4_2minus():
+    return compound("SO4-2", "aq", charge=-2)
+@library
+def hso4_minus():
+    return compound("HSO4-", "aq", charge=-1)
+@library
+def s2o3_2minus():
+    return compound("S2O3-2", "aq", charge=-2)
+@library
+def co3_2minus():
+    return compound("CO3-2", "aq", charge=-2)
+@library
+def hco3_minus():
+    return compound("HCO3-", "aq", charge=-1)
+@library
+def po4_3minus():
+    return compound("PO4-3", "aq", charge=-3)
+@library
+def hpo4_2minus():
+    return compound("HPO4-2", "aq", charge=-2)
+@library
+def h2po4_minus():
+    return compound("H2PO4-", "aq", charge=-1)
+@library
+def clo_minus():
+    return compound("ClO-", "aq", charge=-1)
+@library
+def clo2_minus():
+    return compound("ClO2-", "aq", charge=-1)
+@library
+def clo3_minus():
+    return compound("ClO3-", "aq", charge=-1)
+@library
+def clo4_minus():
+    return compound("ClO4-", "aq", charge=-1)
+@library
+def ch3coo_minus():
+    return compound("CH3COO-", "aq", charge=-1)
+@library
+def c2o4_2minus():
+    return compound("C2O4-2", "aq", charge=-2)
 
 # colored oxoanions / polyhalides — connected envelopes, λmax/ε from analytical tables
 # MnO4- visible vibronic structure plus the near-UV charge-transfer band
-mno4 = compound(
+@library
+def mno4():
+    return compound(
     "MnO4-",
     "aq",
     charge=-1,
@@ -107,19 +239,25 @@ mno4 = compound(
         (650, 0.0),
     ),
 )
-cro4 = compound(
+@library
+def cro4():
+    return compound(
     "CrO4-2",
     "aq",
     charge=-2,
     spectrum=vis_bands((273, 3620.0, 4000.0), (372, 4830.0, 2800.0)),
 )
-cr2o7 = compound(
+@library
+def cr2o7():
+    return compound(
     "Cr2O7-2",
     "aq",
     charge=-2,
     spectrum=vis_bands((257, 2300.0, 4000.0), (350, 1570.0, 3800.0), (440, 370.0, 3000.0)),
 )
-i3 = compound(
+@library
+def i3():
+    return compound(
     "I3-",
     "aq",
     charge=-1,

@@ -3,10 +3,10 @@
 Import named species and interpolate the live object into a reaction string::
 
     from ChemCompute.compounds import water, h_plus, oh_minus, mno4
-    Reaction.from_string(f"{water.token} > {h_plus.token} & {oh_minus.token}")
+    Reaction.from_string(f"{water().token} > {h_plus().token} & {oh_minus().token}")
 
-These are shared module singletons. Copy before mutating ``spectrum``, ``mp``,
-or ``bp``.
+Each name is a function that **returns** the shared library compound (the same
+object every time). Copy before mutating ``spectrum``, ``mp``, or ``bp``.
 
 ``mp`` and ``bp`` are 1 atm values in **kelvin** (the same scale as ``env.T``).
 Ions and species that sublime or decompose omit them.
@@ -30,6 +30,8 @@ from ._ions import *
 from ._ions import __all__ as _IONS
 from ._molecules import *
 from ._molecules import __all__ as _MOLECULES
+from ._solids import *
+from ._solids import __all__ as _SOLIDS
 
 __all__ = [
     "all_compounds",
@@ -37,6 +39,7 @@ __all__ = [
     *_MOLECULES,
     *_IONS,
     *_COMPLEXES,
+    *_SOLIDS,
 ]
 
 
@@ -45,6 +48,8 @@ def all_compounds():
     seen = {}
     for name in __all__:
         obj = globals()[name]
+        if callable(obj) and name not in ("all_compounds", "get"):
+            obj = obj()
         if isinstance(obj, Compound) and id(obj) not in seen:
             seen[id(obj)] = obj
     return tuple(seen.values())
