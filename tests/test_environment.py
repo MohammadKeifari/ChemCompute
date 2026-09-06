@@ -1290,10 +1290,30 @@ class TestUVVis:
         env = Enviroment(rxn)
         env.concentrations = [0.001, 0.0]
         env.set_spectrum("D", SpectrumSpec(points=[(500e-9, 1000.0)], extrapolate="flat"))
+        assert dye.spectrum is not None
         a1 = uvvis_spectrum(env, wavelengths=[500e-9], path_length=0.01)[0]
         env.concentrations = [0.002, 0.0]
         a2 = uvvis_spectrum(env, wavelengths=[500e-9], path_length=0.01)[0]
         assert np.isclose(a2, 2 * a1)
+
+    def test_spectrum_on_compound_survives_mix(self):
+        spec = SpectrumSpec(points=[(500e-9, 1000.0)], extrapolate="flat")
+        dye = aq("D", spectrum=spec)
+        dummy = aq("X")
+        rxn = Reaction(
+            reactants=[{"stoichiometric_coefficient": 1, "compound": dye, "rate_dependency": 1}],
+            products=[{"stoichiometric_coefficient": 1, "compound": dummy, "rate_dependency": 1}],
+            reactants_concentration=[0.002],
+            products_concentration=[0.0],
+            K=1.0,
+        )
+        env_dye = Enviroment(rxn, volume=1.0)
+        env_salt = Enviroment.from_compounds({"Na+": 0.1}, volume=1.0)
+        mixed = env_dye + env_salt
+        mixed_dye = mixed.compounds[mixed.compound_labels.index("D")]
+        assert mixed_dye.spectrum is not None
+        absorbance = uvvis_spectrum(mixed, wavelengths=[500e-9], path_length=0.01)[0]
+        assert absorbance == pytest.approx(0.002 * 0.5 * 1000.0 * 0.01)
 
 
 # --- Phase, half-reactions, Pourbaix ---

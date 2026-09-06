@@ -98,16 +98,18 @@ def combine_environments(*terms):
     excess_flags = {}
     merged_reactions = []
     charge_map = {}
-    spectra = {}
 
     for coeff, env in normalized:
         merged_reactions.extend(copy_module.deepcopy(env.reactions))
         charge_map.update(env.charge_map)
-        spectra.update(env.spectra)
         effective_volume = coeff * env.volume
         env_excess = getattr(env, "excess_dict", {})
         for formula, concentration in env.concentrations_dict.items():
-            compound_objects[formula] = env.compounds[env.compound_labels.index(formula)]
+            incoming = env.compounds[env.compound_labels.index(formula)]
+            if formula not in compound_objects:
+                compound_objects[formula] = incoming
+            elif getattr(incoming, "spectrum", None) is not None:
+                compound_objects[formula] = incoming
             mole_totals[formula] = mole_totals.get(formula, 0.0) + concentration * effective_volume
             excess_flags[formula] = excess_flags.get(formula, False) or env_excess.get(formula, False)
 
@@ -115,7 +117,6 @@ def combine_environments(*terms):
     combined.reactions = merged_reactions
     combined.adjust_thermodynamics = adjust_thermodynamics
     combined.charge_map = charge_map
-    combined.spectra = spectra
     combined._activity_model = activity_model
     combined._T = T
     combined.volume = total_effective_volume

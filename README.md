@@ -394,15 +394,20 @@ The sample and titrant are not mutated. Mixing uses the same volume-weighted rul
 
 ## UV–Vis (Beer–Lambert)
 
-User-supplied molar absorptivity points with piecewise-linear interpolation:
+Molar absorptivity is a property of the compound. User-supplied points use piecewise-linear interpolation:
 
 ```python
-from ChemCompute import SpectrumSpec, uvvis_spectrum
+from ChemCompute import Compound, SpectrumSpec, uvvis_spectrum
 
-env.set_spectrum("InH", SpectrumSpec(
-    points=[(400e-9, 12000), (450e-9, 25000), (500e-9, 8000)],
-    extrapolate="flat",  # or "none" for zero epsilon off-tabulated wavelengths
-))
+inh = Compound(
+    "InH",
+    spectrum=SpectrumSpec(
+        points=[(400e-9, 12000), (450e-9, 25000), (500e-9, 8000)],
+        extrapolate="flat",  # or "none" for zero epsilon off-tabulated wavelengths
+    ),
+)
+# After parsing a reaction string, attach by formula:
+# env.set_spectrum("InH", SpectrumSpec(...))
 A = uvvis_spectrum(env, wavelengths=[450e-9, 500e-9], path_length=0.01)
 ```
 

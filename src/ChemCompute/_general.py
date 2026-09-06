@@ -91,9 +91,10 @@ class Compound:
         phase_point_list (list[dict]): A list of phase data points, each as {"temperature": float, "phase": str}.
         mp (float | None): Melting point of the compound (°C or K, depending on convention).
         bp (float | None): Boiling point of the compound.
+        spectrum: Optional UV-Vis molar absorptivity spec (:class:`SpectrumSpec`).
     """
 
-    def __init__(self , formula  , phase_point_list=None , mp=None, bp=None ,scription=True, charge=0):
+    def __init__(self , formula  , phase_point_list=None , mp=None, bp=None ,scription=True, charge=0, spectrum=None):
         """
         Initialize a Compound object based on its formula, phase information, and thermal properties.
 
@@ -106,6 +107,7 @@ class Compound:
             bp (float, optional): Boiling point temperature.
             scription (bool, optional): If True, converts the formula into Unicode with subscripts/superscripts.
             charge (int, optional): Ionic charge for activity-coefficient calculations. Default 0.
+            spectrum: Optional :class:`SpectrumSpec` (or compatible) molar absorptivity curve.
         
         Raises:
             ValueError: If a phase in `phase_point_list` is not one of {"s", "l", "g", "aq"}.
@@ -168,6 +170,11 @@ class Compound:
         self.mp = mp
         self.bp = bp
         self.charge = int(charge)
+        self.spectrum = spectrum
+
+    def set_spectrum(self, spectrum_spec):
+        """Attach a UV-Vis molar absorptivity specification to this compound."""
+        self.spectrum = spectrum_spec
 
     def phase(self , temperature):
         """
@@ -855,7 +862,6 @@ class Enviroment():
         self._T = T
         self.adjust_thermodynamics = adjust_thermodynamics
         self.charge_map = {}
-        self.spectra = {}
         self._activity_model = normalize_activity_model(activity_model)
         self.volume = float(volume)
         for item in items:
@@ -918,7 +924,6 @@ class Enviroment():
         env._electrode_Eh = None
         env.adjust_thermodynamics = adjust_thermodynamics
         env.charge_map = {}
-        env.spectra = {}
         env._activity_model = normalize_activity_model(activity_model)
         env._T = T
         env.volume = float(volume)
@@ -1163,8 +1168,20 @@ class Enviroment():
         self._activity_model = normalize_activity_model(value)
 
     def set_spectrum(self, formula: str, spectrum_spec):
-        """Attach a SpectrumSpec to a compound by formula label."""
-        self.spectra[formula] = spectrum_spec
+        """Attach a SpectrumSpec to the compound(s) in this environment with ``formula``."""
+        found = False
+        for compound in self.compounds:
+            if compound.formula == formula:
+                compound.spectrum = spectrum_spec
+                found = True
+        for reaction in self.reactions:
+            for entry in reaction.reactants + reaction.products:
+                species = entry["compound"]
+                if getattr(species, "formula", None) == formula:
+                    species.spectrum = spectrum_spec
+                    found = True
+        if not found:
+            raise ValueError(f"Compound {formula!r} is not in the environment.")
 
     def copy(self):
         """Return a deep copy of this environment for titration and other workflows."""
@@ -1173,7 +1190,6 @@ class Enviroment():
         new_env = Enviroment.__new__(Enviroment)
         new_env.adjust_thermodynamics = self.adjust_thermodynamics
         new_env.charge_map = dict(self.charge_map)
-        new_env.spectra = dict(self.spectra)
         new_env._activity_model = self._activity_model
         new_env._T = self._T
         new_env.volume = self.volume
@@ -1299,6 +1315,10 @@ class Enviroment():
                     self.compounds_concentration[index_in_compounds_concentration]["concentration"] += reaction.compounds[index_in_reaction]["concentration"]
                     if entry_excess:
                         self.compounds_concentration[index_in_compounds_concentration]["excess"] = True
+                    kept = self.compounds_concentration[index_in_compounds_concentration]["compound"]
+                    incoming = compound["compound"]
+                    if getattr(kept, "spectrum", None) is None and getattr(incoming, "spectrum", None) is not None:
+                        kept.spectrum = incoming.spectrum
                 else:
                     self.compounds_concentration.append(
                         {

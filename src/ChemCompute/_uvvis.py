@@ -58,9 +58,15 @@ class SpectrumSpec:
         return np.array([self.epsilon(w) for w in wavelengths], dtype=float)
 
 
-def _resolve_spectrum(env, formula: str, spectra: Optional[dict] = None) -> Optional[SpectrumSpec]:
-    lookup = spectra if spectra is not None else getattr(env, "spectra", {})
-    return lookup.get(formula)
+def _compound_spectrum(compound) -> Optional[SpectrumSpec]:
+    return getattr(compound, "spectrum", None)
+
+
+def _resolve_spectrum(compound, spectra: Optional[dict] = None) -> Optional[SpectrumSpec]:
+    formula = compound.formula if hasattr(compound, "formula") else str(compound)
+    if spectra is not None:
+        return spectra.get(formula)
+    return _compound_spectrum(compound)
 
 
 def uvvis_spectrum(
@@ -74,6 +80,9 @@ def uvvis_spectrum(
     """
     Compute absorbance A(λ) = sum_i epsilon_i(λ) * c_i * l.
 
+    Molar absorptivity is read from each :class:`Compound`'s ``spectrum``.
+    Pass ``spectra={formula: SpectrumSpec, ...}`` to override for this call.
+
     Parameters
     ----------
     path_length : float
@@ -86,19 +95,26 @@ def uvvis_spectrum(
 
     if wavelengths is None:
         all_wl = set()
-        lookup = spectra if spectra is not None else getattr(env, "spectra", {})
-        for spec in lookup.values():
+        if spectra is not None:
+            specs = list(spectra.values())
+        else:
+            specs = [
+                compound.spectrum
+                for compound in env.compounds
+                if getattr(compound, "spectrum", None) is not None
+            ]
+        for spec in specs:
             for wl, _ in spec.points:
                 all_wl.add(wl)
         if not all_wl:
-            raise ValueError("No wavelengths provided and no spectra registered on env.")
+            raise ValueError("No wavelengths provided and no compound spectra registered.")
         wavelengths = sorted(all_wl)
 
     wavelengths = np.asarray(list(wavelengths), dtype=float)
     absorbance = np.zeros_like(wavelengths, dtype=float)
 
     for j, compound in enumerate(env.compounds):
-        spec = _resolve_spectrum(env, compound.formula, spectra)
+        spec = _resolve_spectrum(compound, spectra)
         if spec is None:
             continue
         eps = spec.epsilon_array(wavelengths)
