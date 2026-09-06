@@ -17,6 +17,7 @@ from ChemCompute import (
     ScaledEnviroment,
     SpectrumSpec,
     Titration,
+    XS,
     buffer_diagnostics,
     competitive_inhibition,
     ionic_strength,
@@ -939,6 +940,124 @@ class TestTitration:
         assert os.path.isfile("titration_test_pH.png")
         os.remove("titration_test_plot.png")
         os.remove("titration_test_pH.png")
+
+
+class TestAmmoniumTartrateSilverFluorideTitration:
+    """50 mL of 0.07 M AgF titrated with 0.01 M (NH4)2T until Ag2T would precipitate."""
+
+    def test_qsp_surpasses_ksp_near_0_004_microliters(self):
+        ksp = 4e-12
+        eq_kwargs = dict(method="newton", tol=1e-10, max_iter=8000, min_concentration=1e-20)
+
+        agf = Enviroment(
+            Reaction.from_string(
+                "H2O.l > H+ & OH-",
+                concentrations={"H2O": XS(55.5), "H+": 1e-7, "OH-": 1e-7},
+                K=1e-14,
+            ),
+            Reaction.from_string("HF.aq > H+ & F-", K=10 ** (-3.1)),
+            concentrations={"Ag+": 0.07, "F-": 0.07},
+            volume=0.050,
+        )
+        titrant = Enviroment(
+            Reaction.from_string("H2T > H+ & HT-", K=10 ** (-4.2)),
+            Reaction.from_string("HT- > H+ & T-2", K=10 ** (-6.5)),
+            Reaction.from_string("NH4+ > H+ & NH3", K=10 ** (-9.2)),
+            Reaction.from_string("Ag+ & 2_NH3 > Ag(NH3)2+", K=2e7),
+            concentrations={"NH4+": 0.02, "T-2": 0.01},
+            volume=1.0,
+        )
+
+        last_safe_ul = None
+        first_precip_ul = None
+        previous_qsp = None
+        for volume_ul in (0.001, 0.003, 0.004, 0.0042, 0.0045, 0.01):
+            mixed = agf + (volume_ul * 1e-6) * titrant
+            result = mixed.equilibrium(**eq_kwargs, return_details=True)
+            assert result.criterion_met
+            qsp = result.concentrations_dict["Ag+"] ** 2 * result.concentrations_dict["T-2"]
+            if previous_qsp is not None:
+                assert qsp > previous_qsp
+            previous_qsp = qsp
+            if qsp <= ksp:
+                last_safe_ul = volume_ul
+            elif first_precip_ul is None:
+                first_precip_ul = volume_ul
+
+        assert last_safe_ul == 0.0042
+        assert first_precip_ul == 0.0045
+
+
+class TestFeSCNUnknownSolutions:
+    """Identify A–D from 470 nm absorbances, then predict the equal-volume mix."""
+
+    def test_table_identifies_abcd_and_equal_volume_absorbance(self):
+        wavelength = 470e-9
+        eq_kwargs = dict(method="newton", tol=1e-10, max_iter=8000, min_concentration=1e-20)
+
+        fe = Enviroment(
+            Reaction.from_string("Fe+3 > FeOH+2 & H+", K=10 ** (-2.90)),
+            Reaction.from_string("Fe+3 & SCN- > FeSCN+2", K=10 ** 3.22),
+            concentrations={"Fe+3": 0.001, "NO3-": 0.003},
+            volume=1.0,
+        )
+        fe.set_spectrum("FeSCN+2", SpectrumSpec(points=[(wavelength, 3700.0)], extrapolate="none"))
+        scn = Enviroment.from_compounds({"K+": 0.0005, "SCN-": 0.0005}, volume=1.0)
+        acid = Enviroment(
+            Reaction.from_string(
+                "HNO3.aq > H+ & NO3-",
+                concentrations={"HNO3": 0.120},
+                infinite_K=True,
+            ),
+            volume=1.0,
+        )
+        water = Enviroment(
+            Reaction.from_string(
+                "H2O.l > H+ & OH-",
+                concentrations={"H2O": XS(55.5), "H+": 1e-7, "OH-": 1e-7},
+                K=1e-14,
+            ),
+            volume=1.0,
+        )
+
+        solution_a = scn
+        solution_b = water
+        solution_c = acid
+        solution_d = fe
+
+        cases = (
+            (20, 20, 40, 20, 0.082),
+            (20, 55, 5, 20, 0.073),
+            (10, 40, 40, 10, 0.024),
+            (50, 10, 5, 35, 0.242),
+            (20, 10, 10, 50, 0.173),
+        )
+        for va, vb, vc, vd, measured in cases:
+            mixed = (
+                (va * 1e-3) * solution_a
+                + (vb * 1e-3) * solution_b
+                + (vc * 1e-3) * solution_c
+                + (vd * 1e-3) * solution_d
+            )
+            result = mixed.apply_equilibrium(**eq_kwargs)
+            assert result.criterion_met
+            absorbance = uvvis_spectrum(
+                mixed,
+                wavelengths=[wavelength],
+                path_length=1.0,
+            )[0]
+            assert absorbance == pytest.approx(measured, abs=0.02)
+
+        equal = (
+            0.025 * solution_a
+            + 0.025 * solution_b
+            + 0.025 * solution_c
+            + 0.025 * solution_d
+        )
+        result = equal.apply_equilibrium(**eq_kwargs)
+        assert result.criterion_met
+        absorbance = uvvis_spectrum(equal, wavelengths=[wavelength], path_length=1.0)[0]
+        assert absorbance == pytest.approx(0.119, abs=0.002)
 
 
 # --- Activity ---
