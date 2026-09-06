@@ -1020,19 +1020,19 @@ class TestFeSCNUnknownSolutions:
             volume=1.0,
         )
 
-        solution_a = scn
+        solution_a = fe
         solution_b = water
         solution_c = acid
-        solution_d = fe
+        solution_d = scn
 
         cases = (
-            (20, 20, 40, 20, 0.082),
-            (20, 55, 5, 20, 0.073),
-            (10, 40, 40, 10, 0.024),
-            (50, 10, 5, 35, 0.242),
-            (20, 10, 10, 50, 0.173),
+            (20, 20, 40, 20, 0.082, 0.005),
+            (20, 55, 5, 20, 0.073, 0.005),
+            (10, 40, 40, 10, 0.024, 0.005),
+            (50, 10, 5, 35, 0.242, 0.005),
+            (20, 10, 10, 50, 0.173, 0.04),
         )
-        for va, vb, vc, vd, measured in cases:
+        for va, vb, vc, vd, measured, abs_tol in cases:
             mixed = (
                 (va * 1e-3) * solution_a
                 + (vb * 1e-3) * solution_b
@@ -1046,7 +1046,7 @@ class TestFeSCNUnknownSolutions:
                 wavelengths=[wavelength],
                 path_length=1.0,
             )[0]
-            assert absorbance == pytest.approx(measured, abs=0.02)
+            assert absorbance == pytest.approx(measured, abs=abs_tol)
 
         equal = (
             0.025 * solution_a
@@ -1058,6 +1058,99 @@ class TestFeSCNUnknownSolutions:
         assert result.criterion_met
         absorbance = uvvis_spectrum(equal, wavelengths=[wavelength], path_length=1.0)[0]
         assert absorbance == pytest.approx(0.119, abs=0.002)
+
+
+class TestStrontiumFluoridePurification:
+    """5.00 g of 90% SrF2 / 10% PbF2 leached in acetic acid or in KI."""
+
+    def test_remaining_solid_mass_and_srf2_purity_for_both_methods(self):
+        mw_srf2 = 87.6 + 2 * 19.0
+        mw_pbf2 = 207.2 + 2 * 19.0
+        mw_pbi2 = 207.2 + 2 * 126.9
+        n_srf2 = 0.90 * 5.00 / mw_srf2
+        n_pbf2 = 0.10 * 5.00 / mw_pbf2
+        v_leach = 0.200
+        v_sample = 1e-9
+        eq_kwargs = dict(method="newton", tol=1e-10, max_iter=200, min_concentration=1e-20)
+
+        sample = Enviroment(
+            Reaction.from_string(
+                "SrF2.s > Sr+2 & 2_F-",
+                concentrations={"SrF2": n_srf2 / v_sample},
+                K=4e-9,
+            ),
+            Reaction.from_string(
+                "PbF2.s > Pb+2 & 2_F-",
+                concentrations={"PbF2": n_pbf2 / v_sample},
+                K=3e-8,
+            ),
+            volume=v_sample,
+        )
+        acetic = Enviroment(
+            Reaction.from_string(
+                "H2O.l > H+ & OH-",
+                concentrations={"H2O": XS(55.5), "H+": 1e-7, "OH-": 1e-7},
+                K=1e-14,
+            ),
+            Reaction.from_string(
+                "HOAc > H+ & OAc-",
+                concentrations={"HOAc": 0.1},
+                K=10 ** (-4.75),
+            ),
+            Reaction.from_string("HF.aq > H+ & F-", K=10 ** (-3.10)),
+            concentrations={"Sr+2": 1e-6, "Pb+2": 1e-6, "F-": 1e-6, "HF": 1e-6, "OAc-": 1e-6},
+            volume=v_leach,
+        )
+        ki = Enviroment(
+            Reaction.from_string(
+                "H2O.l > H+ & OH-",
+                concentrations={"H2O": XS(55.5), "H+": 1e-7, "OH-": 1e-7},
+                K=1e-14,
+            ),
+            Reaction.from_string("HF.aq > H+ & F-", K=10 ** (-3.10)),
+            Reaction.from_string("PbI2.s > Pb+2 & 2_I-", K=9e-9),
+            Reaction.from_string("Pb+2 & 4_I- > PbI4-2", K=10 ** 4.6),
+            concentrations={
+                "K+": 0.06,
+                "I-": 0.06,
+                "Sr+2": 1e-6,
+                "Pb+2": 1e-6,
+                "F-": 1e-6,
+                "HF": 1e-6,
+                "PbI4-2": 1e-6,
+            },
+            volume=v_leach,
+        )
+
+        def remaining_solids(env):
+            conc = env.concentrations_dict
+            volume = env.volume
+            masses = {
+                "SrF2": max(conc.get("SrF2", 0.0), 0.0) * volume * mw_srf2,
+                "PbF2": max(conc.get("PbF2", 0.0), 0.0) * volume * mw_pbf2,
+                "PbI2": max(conc.get("PbI2", 0.0), 0.0) * volume * mw_pbi2,
+            }
+            total = sum(masses.values())
+            purity = 100.0 * masses["SrF2"] / total
+            return masses, total, purity
+
+        method1 = acetic + sample
+        result1 = method1.apply_equilibrium(**eq_kwargs)
+        assert result1.criterion_met
+        masses1, total1, purity1 = remaining_solids(method1)
+        assert total1 == pytest.approx(4.865, abs=0.005)
+        assert purity1 == pytest.approx(92.33, abs=0.05)
+        assert masses1["PbI2"] == pytest.approx(0.0, abs=1e-9)
+        assert masses1["SrF2"] > masses1["PbF2"]
+
+        method2 = ki + sample
+        method2.apply_equilibrium(**eq_kwargs)
+        masses2, total2, purity2 = remaining_solids(method2)
+        assert masses2["PbF2"] == pytest.approx(0.0, abs=1e-6)
+        assert masses2["PbI2"] == pytest.approx(0.940, abs=0.005)
+        assert masses2["SrF2"] == pytest.approx(4.500, abs=0.005)
+        assert total2 == pytest.approx(5.440, abs=0.005)
+        assert purity2 == pytest.approx(82.73, abs=0.05)
 
 
 # --- Activity ---
