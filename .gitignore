@@ -7,3 +7,5 @@ __pycache__/
 *.pyc
 *.egg-info/
 manual_test_output/
+plot.png
+**/plot.png

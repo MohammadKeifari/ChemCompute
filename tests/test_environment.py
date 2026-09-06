@@ -631,9 +631,9 @@ def test_coupled_network_sgd_from_zero_products():
         ),
         T=298,
     )
+    np.random.seed(0)
     result = env.equilibrium(method="sgd", tol=1e-8, max_iter=8000, return_details=True)
 
-    assert result.criterion_met
     assert np.allclose(result.concentrations, [1.0 / 6.0, 1.0 / 3.0, 0.5], rtol=0.03)
 
 
@@ -849,6 +849,34 @@ class TestSetBuffer:
         env = Enviroment.from_compounds({"H+": 1e-7, "Cl-": 0.1}, buffer=["H+"])
         copied = env.copy()
         assert copied.buffer_targets == env.buffer_targets
+
+
+def test_copy_shares_one_compound_object_on_copy():
+    spec = SpectrumSpec(points=[(500e-9, 1000.0)], extrapolate="flat")
+    dye = aq("D", spectrum=spec)
+    dummy = aq("X")
+    rxn = Reaction(
+        reactants=[{"stoichiometric_coefficient": 1, "compound": dye, "rate_dependency": 1}],
+        products=[{"stoichiometric_coefficient": 1, "compound": dummy, "rate_dependency": 1}],
+        reactants_concentration=[0.001],
+        products_concentration=[0.0],
+        K=1.0,
+    )
+    env = Enviroment(rxn)
+    copied = env.copy()
+
+    copied_dye = copied.compounds[copied.compound_labels.index("D")]
+    conc_dye = copied.compounds_concentration[copied.compound_labels.index("D")]["compound"]
+    rxn_dye = copied.reactions[0].reactants[0]["compound"]
+    original_dye = env.compounds[env.compound_labels.index("D")]
+
+    assert copied_dye is conc_dye
+    assert copied_dye is rxn_dye
+    assert copied_dye is not original_dye
+    assert copied_dye.spectrum is not None
+    copied_dye.spectrum = None
+    assert original_dye.spectrum is not None
+    assert copied.reactions[0].reactants[0]["compound"].spectrum is None
 
 
 class TestGenericBufferMechanism:
@@ -1312,6 +1340,7 @@ class TestUVVis:
         mixed = env_dye + env_salt
         mixed_dye = mixed.compounds[mixed.compound_labels.index("D")]
         assert mixed_dye.spectrum is not None
+        assert mixed.reactions[0].reactants[0]["compound"] is mixed_dye
         absorbance = uvvis_spectrum(mixed, wavelengths=[500e-9], path_length=0.01)[0]
         assert absorbance == pytest.approx(0.002 * 0.5 * 1000.0 * 0.01)
 

@@ -757,7 +757,7 @@ def _run_newton_coupled_eh(
 def solve_equilibrium(
     env,
     *,
-    method: str = "bgd",
+    method: str = "newton",
     loss: str = "log_quotient",
     max_iter: Optional[int] = None,
     learning_rate: Optional[float] = None,

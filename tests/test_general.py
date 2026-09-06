@@ -2,7 +2,7 @@ import math
 
 import pytest
 import numpy as np
-from src.ChemCompute import Compound, Enviroment, HalfReaction, Reaction, SpectrumSpec, XS
+from ChemCompute import Compound, Environment, Enviroment, HalfReaction, Reaction, SpectrumSpec, XS
 
 
 # -------------------------
@@ -35,6 +35,10 @@ def test_unicode_formula_with_numbers_subscript():
 def test_scription_disabled_uses_plain_formula():
     c = Compound("CO2", scription=False)
     assert c.unicode_formula == "CO2"
+
+
+def test_environment_alias_is_enviroment():
+    assert Environment is Enviroment
 
 
 # ---------- Phase Data Validation ---------- #
@@ -172,6 +176,22 @@ def test_from_string_explicit_rate_order_overrides_stoichiometry():
     reaction = Reaction.from_string("2_A_1 & B > C", [1, 1, 0])
     assert reaction.reactants[0]["stoichiometric_coefficient"] == 2
     assert reaction.reactants[0]["rate_dependency"] == 1
+
+
+def test_from_string_aq_phase_and_stoich_rate_phase():
+    hf = Reaction.from_string("HF.aq > H+ & F-", K=1e-3)
+    assert hf.reactants[0]["compound"].phase(298) == "aq"
+
+    water = Reaction.from_string("2_H2O_1.l > H+ & OH-", K=1e-14)
+    assert water.reactants[0]["stoichiometric_coefficient"] == 2
+    assert water.reactants[0]["rate_dependency"] == 1
+    assert water.reactants[0]["compound"].phase(298) == "l"
+    assert water.reactants[0]["compound"].formula == "H2O"
+
+    hf_rate = Reaction.from_string("2_HF_1.aq > H+ & F-", K=1e-3)
+    assert hf_rate.reactants[0]["stoichiometric_coefficient"] == 2
+    assert hf_rate.reactants[0]["rate_dependency"] == 1
+    assert hf_rate.reactants[0]["compound"].phase(298) == "aq"
 
 
 def test_from_string_token_keeps_live_compound_and_spectrum():

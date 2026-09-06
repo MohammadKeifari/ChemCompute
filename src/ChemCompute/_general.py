@@ -420,6 +420,7 @@ class Reaction:
         Example:
             "Fe(CN)6-3 & Ce+2 > Fe(CN)6-4 & Ce+3"
         """
+        from ._formula import split_phase_suffix
         from ._interpolation import compound_from_parsed_name
 
         reformed_reaction = reaction_str.replace(" ","").split(">")
@@ -434,42 +435,44 @@ class Reaction:
                 rf"^(\d+(?:\.\d+)?_{_species}_-?\d+(?:\.\d+)?|"
                 rf"\d+(?:\.\d+)?_{_species}|"
                 rf"{_species}_-?\d+(?:\.\d+)?|"
-                rf"{_species})(\.s|\.g|\.l)?$"
+                rf"{_species})(\.s|\.g|\.l|\.aq)?$"
             )
             for section in component:
 
                 if not bool(acceptable_pattern_for_section.match(section)):
                      raise ValueError("You can't make a reaction from string with this expression")
-                
-                splitted_section = section.split("_")
+
+                core, phase = split_phase_suffix(section)
+                phase_suffix = f".{phase}" if phase else ""
+                splitted_section = core.split("_")
                 lenght = len(splitted_section)
                 if lenght == 3:
                     compound_info = {
                     "stoichiometric_coefficient" : float(splitted_section[0]),
-                    "compound" : splitted_section[1],
+                    "compound" : splitted_section[1] + phase_suffix,
                     "rate_dependency" : float(splitted_section[2])
                     }
 
                 elif lenght == 2:
-                    if re.match(r'^\d+(?:\.\d+)?_[A-Za-z0-9+.\-()]+$' , section) :
+                    if re.match(r'^\d+(?:\.\d+)?$', splitted_section[0]):
                         stoich = float(splitted_section[0])
                         compound_info = {
                             "stoichiometric_coefficient" : stoich,
-                            "compound" : splitted_section[1],
+                            "compound" : splitted_section[1] + phase_suffix,
                             "rate_dependency" : stoich
                         }
 
-                    elif re.match(r'^[A-Za-z0-9+.\-()]+_\d+(?:\.\d+)?$' , section) :
+                    else:
                         compound_info = {
                             "stoichiometric_coefficient" : 1,
-                            "compound" : splitted_section[0],
+                            "compound" : splitted_section[0] + phase_suffix,
                             "rate_dependency" : float(splitted_section[1])
                         }
 
                 elif lenght == 1:
                     compound_info = {
                     "stoichiometric_coefficient" : 1,
-                    "compound" : splitted_section[0],
+                    "compound" : splitted_section[0] + phase_suffix,
                     "rate_dependency" : 1
                     }
                 if component_counter == 0:
@@ -711,7 +714,7 @@ class Reaction:
     def equilibrium(
         self,
         *,
-        method: str = "bgd",
+        method: str = "newton",
         loss: str = "log_quotient",
         max_iter=None,
         learning_rate=None,
@@ -1193,6 +1196,12 @@ class Enviroment():
         """Return a deep copy of this environment for titration and other workflows."""
         import copy as copy_module
 
+        from ._mixing import rewire_half_reactions, rewire_reaction_compounds
+
+        formula_to_compound = {
+            compound.formula: copy_module.deepcopy(compound) for compound in self.compounds
+        }
+
         new_env = Enviroment.__new__(Enviroment)
         new_env.adjust_thermodynamics = self.adjust_thermodynamics
         new_env.charge_map = dict(self.charge_map)
@@ -1200,12 +1209,21 @@ class Enviroment():
         new_env._T = self._T
         new_env.volume = self.volume
         new_env.reactions = copy_module.deepcopy(self.reactions)
-        new_env.compounds = [entry["compound"] for entry in self.compounds_concentration]
-        new_env.compounds_concentration = copy_module.deepcopy(self.compounds_concentration)
+        rewire_reaction_compounds(new_env.reactions, formula_to_compound)
+        new_env.compounds_concentration = [
+            {
+                "compound": formula_to_compound[entry["compound"].formula],
+                "concentration": float(entry["concentration"]),
+                "excess": bool(entry.get("excess", False)),
+            }
+            for entry in self.compounds_concentration
+        ]
+        new_env.compounds = [entry["compound"] for entry in new_env.compounds_concentration]
         new_env._buffer_spec = dict(getattr(self, "_buffer_spec", {}))
         new_env._buffer_targets = dict(getattr(self, "_buffer_targets", {}))
         new_env._last_equilibrium_result = None
         new_env.half_reactions = copy_module.deepcopy(getattr(self, "half_reactions", []))
+        rewire_half_reactions(new_env.half_reactions, formula_to_compound)
         new_env._electrode_Eh = getattr(self, "_electrode_Eh", None)
         for hr in new_env.half_reactions:
             if hr._reaction_index is not None and hr._reaction_index < len(new_env.reactions):
@@ -1656,7 +1674,7 @@ class Enviroment():
     def equilibrium(
         self,
         *,
-        method: str = "bgd",
+        method: str = "newton",
         loss: str = "log_quotient",
         max_iter=None,
         learning_rate=None,
@@ -1673,7 +1691,7 @@ class Enviroment():
         Parameters
         ----------
         method : str, optional
-            Optimization method: ``"bgd"``, ``"sgd"``, or ``"newton"``. Default ``"bgd"``.
+            Optimization method: ``"bgd"``, ``"sgd"``, or ``"newton"``. Default ``"newton"``.
         loss : str, optional
             Loss function: ``"log_quotient"``, ``"quotient_error"``, or ``"log_huber"``.
             Default ``"log_quotient"``.
@@ -1764,7 +1782,7 @@ class Enviroment():
     def apply_equilibrium(
         self,
         *,
-        method: str = "bgd",
+        method: str = "newton",
         loss: str = "log_quotient",
         max_iter=None,
         learning_rate=None,

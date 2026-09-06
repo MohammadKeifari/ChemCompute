@@ -1520,7 +1520,7 @@ class Pourbaix:
     Eh_max: float = 1.5
     Eh_steps: int = 40
     geometry_pH_steps: int = 200
-    equilibrium_method: str = "bgd"
+    equilibrium_method: str = "newton"
     equilibrium_tol: float = 1e-8
     quotient_error_limit: float = 0.05
     min_concentration: float = 1e-30

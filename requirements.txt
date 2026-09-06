@@ -2,6 +2,3 @@
 numpy>=1.19.0
 matplotlib>=3.3.0
 
-# Development and testing dependencies
-pytest>=6.0.0
-

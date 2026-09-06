@@ -162,16 +162,10 @@ def _parse_section(section: str) -> dict:
     if not acceptable.match(section):
         raise ValueError(f"Invalid half-reaction term: {section!r}")
 
-    phase_suffix = ""
-    if re.search(r"\.(s|g|l|aq)$", section):
-        if section.endswith(".aq"):
-            phase_suffix = ".aq"
-            core = section[:-3]
-        else:
-            phase_suffix = section[-2:]
-            core = section[:-2]
-    else:
-        core = section
+    from ._formula import split_phase_suffix
+
+    core, phase = split_phase_suffix(section)
+    phase_suffix = f".{phase}" if phase else ""
 
     parts = core.split("_")
     if len(parts) == 3:

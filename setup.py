@@ -1,20 +1,8 @@
 from setuptools import setup, find_packages
 from pathlib import Path
 
-# Read the contents of README file
 this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text(encoding="utf-8")
-
-# Read requirements
-requirements = []
-requirements_path = this_directory / "requirements.txt"
-if requirements_path.exists():
-    with open(requirements_path, "r", encoding="utf-8") as f:
-        requirements = [
-            line.strip()
-            for line in f
-            if line.strip() and not line.startswith("#")
-        ]
 
 setup(
     name="chemcompute",
@@ -34,16 +22,18 @@ setup(
         "Topic :: Scientific/Engineering :: Chemistry",
         "License :: OSI Approved :: MIT License",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.7",
-        "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
         "Operating System :: OS Independent",
     ],
-    python_requires=">=3.7",
-    install_requires=requirements,
+    python_requires=">=3.9",
+    install_requires=[
+        "numpy>=1.19.0",
+        "matplotlib>=3.3.0",
+    ],
     extras_require={
         "dev": [
             "pytest>=6.0.0",

@@ -46,6 +46,38 @@ class ScaledEnviroment:
         return NotImplemented
 
 
+def _entry_formula(compound) -> str:
+    return compound.formula if hasattr(compound, "formula") else str(compound)
+
+
+def rewire_reaction_compounds(reactions, formula_to_compound: dict) -> None:
+    """Point every reaction species dict at the canonical Compound for its formula."""
+    for reaction in reactions:
+        for entry in list(getattr(reaction, "reactants", [])) + list(
+            getattr(reaction, "products", [])
+        ) + list(getattr(reaction, "compounds", [])):
+            compound = entry.get("compound")
+            if compound is None:
+                continue
+            replacement = formula_to_compound.get(_entry_formula(compound))
+            if replacement is not None:
+                entry["compound"] = replacement
+
+
+def rewire_half_reactions(half_reactions, formula_to_compound: dict) -> None:
+    """Point half-reaction species dicts at the canonical Compound for each formula."""
+    for hr in half_reactions or []:
+        for entry in list(getattr(hr, "oxidized", [])) + list(
+            getattr(hr, "reduced", [])
+        ) + list(getattr(hr, "compounds", [])):
+            compound = entry.get("compound")
+            if compound is None:
+                continue
+            replacement = formula_to_compound.get(_entry_formula(compound))
+            if replacement is not None:
+                entry["compound"] = replacement
+
+
 def _normalize_combine_terms(*terms):
     from ._general import Enviroment
 
@@ -71,7 +103,7 @@ def _normalize_combine_terms(*terms):
 
 def combine_environments(*terms):
     """Merge environments with coefficient-weighted volume mixing."""
-    from ._general import Enviroment, Reaction
+    from ._general import Enviroment
 
     normalized = _normalize_combine_terms(*terms)
 
@@ -122,6 +154,8 @@ def combine_environments(*terms):
     combined.volume = total_effective_volume
     combined.compounds = []
     combined.compounds_concentration = []
+    combined.half_reactions = []
+    combined._electrode_Eh = None
     combined._last_equilibrium_result = None
 
     for formula in sorted(compound_objects.keys()):
@@ -133,6 +167,8 @@ def combine_environments(*terms):
                 "excess": excess_flags.get(formula, False),
             }
         )
+
+    rewire_reaction_compounds(merged_reactions, compound_objects)
 
     from ._buffering import merge_buffer_specs
 
