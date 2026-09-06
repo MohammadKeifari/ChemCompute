@@ -13,7 +13,7 @@ from ChemCompute._pourbaix_graph import (
     graph_speciation,
     element_totals_from_env,
 )
-from ChemCompute.test import selenium_environment, ka
+from test_pourbaix import ka, selenium_environment
 
 
 def aq(formula: str, *, charge: int = 0) -> Compound:
