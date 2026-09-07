@@ -1,4 +1,5 @@
 .venv/
+.cursor/
 src/ChemCompute/testcase.txt
 src/ChemCompute/test.py
 build
